@@ -1486,7 +1486,7 @@
  * (e.g. for THEME_Rep Rap Firmware Dark theme).
  * Comment to use standard colors.
  */
-//#define LIVE_TEXT_COMMON_COLOR  // Default: commented (disabled)
+#define LIVE_TEXT_COMMON_COLOR  // Default: commented (disabled)
 
 /**
  * Show Embedded Thumbnails Of G-code Files
