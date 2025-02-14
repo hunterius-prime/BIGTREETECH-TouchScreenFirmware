@@ -120,3 +120,6 @@ cmake-build-*
 .pydevproject
 .settings
 .classpath
+/.vs/BIGTREETECH-TouchScreenFirmware/v17
+/.vs/BIGTREETECH-TouchScreenFirmware/FileContentIndex
+/.vs
