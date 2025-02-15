@@ -271,7 +271,9 @@ void setupMachine(FW_TYPE fwType)
   if (infoMachineSettings.leveling != BL_DISABLED && infoMachineSettings.EEPROM == 1 && infoSettings.auto_load_leveling == 1)
     mustStoreCmd("M420 S1\n");
 
-  mustStoreCmd("M503 S0\n");
+  if(infoMachineSettings.firmwareType != FW_KLIPPER)//klipper doesn't support 503
+    mustStoreCmd("M503 S0\n");
+
   mustStoreCmd("G90\n");  // set to absolute positioning
 
   if (infoSettings.hotend_count > 0)
