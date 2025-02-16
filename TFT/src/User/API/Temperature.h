@@ -10,7 +10,7 @@ extern "C" {
 #include "Settings.h"
 
 #define TEMPERATURE_QUERY_FAST_SECONDS 1  // "M105" temperature query delay in heat menu or while heating.
-#define TEMPERATURE_QUERY_SLOW_SECONDS 3  // temperature query delay when idle
+#define TEMPERATURE_QUERY_SLOW_SECONDS 4  // temperature query delay when idle
 #define TEMPERATURE_RANGE              2  // temperature difference to treat temperature reached target
 #define NOZZLE_TEMP_LAG                5  // nozzle max allowed lag
 

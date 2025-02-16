@@ -1,7 +1,7 @@
 #include "SpeedControl.h"
 #include "includes.h"
 
-#define SPEED_REFRESH_TIME 500  // 1 second is 1000
+#define SPEED_REFRESH_TIME 1000  // 1 second is 1000
 
 static const char * const speedCmd[SPEED_NUM] = {"M220", "M221"};
 
