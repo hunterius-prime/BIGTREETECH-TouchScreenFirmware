@@ -1411,7 +1411,7 @@
  * NOTE: If disabled, EEPROM operations can also be accessed in
  *       Settings -> Machine -> Parameter Settings menu.
  */
-#define QUICK_EEPROM_BUTTON  // Default: uncommented (enabled)
+//#define QUICK_EEPROM_BUTTON  // Default: uncommented (enabled)
 
 /**
  * Toast Notification Duration (in seconds)
