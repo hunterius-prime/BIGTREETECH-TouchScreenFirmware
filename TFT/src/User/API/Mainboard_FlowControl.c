@@ -57,6 +57,9 @@ void loopBackEnd(void)
   if ((priorityCounter.be++ % BE_PRIORITY_DIVIDER) != 0)  // a divider value of 16 -> run 6% of the time only
     return;
 
+  // Turtle FilamentMaker: keep the status report alive
+  fmLoop();
+
   // handle ACK message timeout
   if (InfoHost_HandleAckTimeout())  // if ACK message timeout, unlock any pending query waiting for an update
     resetPendingQueries();

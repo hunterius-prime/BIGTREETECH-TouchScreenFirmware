@@ -294,6 +294,12 @@ void menuStatus(void)
 {
   KEY_VALUES key_num = KEY_IDLE;
 
+  if (fmIsActive())  // Turtle FilamentMaker has its own status screen
+  {
+    REPLACE_MENU(menuFmStatus);
+    return;
+  }
+
   GUI_SetBkColor(infoSettings.bg_color);
   menuDrawPage(&statusItems);
   GUI_SetColor(GANTRY_XYZ_BG_COLOR);

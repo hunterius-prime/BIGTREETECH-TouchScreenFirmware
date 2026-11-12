@@ -3,6 +3,12 @@
 
 void menuMain(void)
 {
+  if (fmIsActive())  // Turtle FilamentMaker has its own main menu
+  {
+    REPLACE_MENU(menuFmMenu);
+    return;
+  }
+
   // 1 title, ITEM_PER_PAGE items (icon + label)
   MENUITEMS mainPageItems = {
     // title

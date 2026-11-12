@@ -101,6 +101,7 @@
 #include "Settings.h"
 #include "SpeedControl.h"
 #include "Temperature.h"
+#include "FilamentMaker.h"  // Turtle FilamentMaker
 #include "Touch_Encoder.h"
 #include "Touch_Screen.h"
 
@@ -115,6 +116,7 @@
 #include "ConnectionSettings.h"
 #include "Extrude.h"
 #include "Fan.h"
+#include "FmMenu.h"  // Turtle FilamentMaker
 #include "FeatureSettings.h"
 #include "Heat.h"
 #include "Home.h"

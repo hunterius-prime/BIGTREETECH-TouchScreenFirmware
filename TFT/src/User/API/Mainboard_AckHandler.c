@@ -442,6 +442,18 @@ void parseAck(void)
     }
 
     //----------------------------------------
+    // Turtle FilamentMaker lines ("FM:", "FM_P:", "FM_V:", "FM_I:" ...)
+    //----------------------------------------
+
+    if (fmIsActive() && ack_starts_with("FM"))
+    {
+      avoid_terminal = (ack_cache[2] == ':');  // keep the periodic status line out of the terminal
+      fmParseAck(ack_cache);
+
+      goto parse_end;
+    }
+
+    //----------------------------------------
     // Onboard media response handling (response requested by the use of setRequestCommandInfo() function)
     //----------------------------------------
 
@@ -1261,7 +1273,12 @@ void parseAck(void)
       uint16_t string_start = ack_index;
       uint16_t string_end = string_start;
 
-      if (ack_continue_seen("Marlin"))
+      if (ack_continue_seen("FilamentMaker"))  // Turtle FilamentMaker controller (Marlin host emulation)
+      {
+        setupMachine(FW_UNKNOWN);
+        fmDetected();
+      }
+      else if (ack_continue_seen("Marlin"))
         setupMachine(FW_MARLIN);
       else if (ack_continue_seen("RepRapFirmware"))
         setupMachine(FW_REPRAPFW);
