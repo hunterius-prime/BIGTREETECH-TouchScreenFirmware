@@ -27,25 +27,26 @@ typedef enum
 typedef struct
 {
   uint16_t     icon;
-  const char * label;
+  const char * label;    // icon label: max 9 characters (wider text is cut)
+  const char * title;    // dialog title (full name)
   const char * cmd;      // FM_<cmd>
   const char * confirm;  // question before sending, NULL = send at once
 } FM_ACTION_DEF;
 
 static const FM_ACTION_DEF fmActions[FM_ACT_COUNT] = {
-  [FM_ACT_NONE]           = {ICON_NULL,             NULL,              NULL,             NULL},
-  [FM_ACT_START]          = {ICON_RESUME,           "Start",           "START",          NULL},
-  [FM_ACT_PAUSE]          = {ICON_PAUSE,            "Pause",           "PAUSE",          NULL},
-  [FM_ACT_RESUME]         = {ICON_RESUME,           "Resume",          "RESUME",         NULL},
-  [FM_ACT_SPOOL_CHANGED]  = {ICON_LOAD,             "Spool changed",   "SPOOL_CHANGED",  NULL},
-  [FM_ACT_CLEAR]          = {ICON_APPLY,            "Clear error",     "CLEAR",          NULL},
-  [FM_ACT_HOME]           = {ICON_HOME,             "Home winder",     "HOME",           NULL},
-  [FM_ACT_CHANGE]         = {ICON_UNLOAD,           "Change spool",    "CHANGE_SPOOL",   "Empty the buffer and stop for a spool change?"},
-  [FM_ACT_STOP]           = {ICON_STOP,             "Stop",            "STOP",           "Stop spooling now?"},
-  [FM_ACT_START_NOWIND]   = {ICON_EXTRUDE,          "No winding",      "START_NOWIND",   "Start spooling without the winder traverse?"},
-  [FM_ACT_PAUSE_NOW]      = {ICON_PAUSE,            "Pause now",       "PAUSE_HARD",     "Stop the spool immediately (buffer is not emptied)?"},
-  [FM_ACT_RESET_COUNTERS] = {ICON_RESET_VALUE,      "Reset counters",  "RESET_COUNTERS", "Reset length, revolutions and layers to zero?"},
-  [FM_ACT_MOTORS_OFF]     = {ICON_DISABLE_STEPPERS, "Motors off",      "MOTORS_OFF",     "Switch the motors off? The winder must be homed again."},
+  [FM_ACT_NONE]           = {ICON_NULL,             NULL,         NULL,              NULL,             NULL},
+  [FM_ACT_START]          = {ICON_RESUME,           "Start",      "Start",           "START",          NULL},
+  [FM_ACT_PAUSE]          = {ICON_PAUSE,            "Pause",      "Pause",           "PAUSE",          NULL},
+  [FM_ACT_RESUME]         = {ICON_RESUME,           "Resume",     "Resume",          "RESUME",         NULL},
+  [FM_ACT_SPOOL_CHANGED]  = {ICON_LOAD,             "Continue",   "Spool changed",   "SPOOL_CHANGED",  NULL},
+  [FM_ACT_CLEAR]          = {ICON_APPLY,            "Clear err",  "Clear error",     "CLEAR",          NULL},
+  [FM_ACT_HOME]           = {ICON_HOME,             "Home",       "Home winder",     "HOME",           NULL},
+  [FM_ACT_CHANGE]         = {ICON_UNLOAD,           "New spool",  "Change spool",    "CHANGE_SPOOL",   "Empty the buffer and stop for a spool change?"},
+  [FM_ACT_STOP]           = {ICON_STOP,             "Stop",       "Stop",            "STOP",           "Stop spooling now?"},
+  [FM_ACT_START_NOWIND]   = {ICON_EXTRUDE,          "No wind",    "Start, no winding", "START_NOWIND", "Start spooling without the winder traverse?"},
+  [FM_ACT_PAUSE_NOW]      = {ICON_PAUSE,            "Pause now",  "Pause now",       "PAUSE_HARD",     "Stop the spool immediately (buffer is not emptied)?"},
+  [FM_ACT_RESET_COUNTERS] = {ICON_RESET_VALUE,      "Reset cnt",  "Reset counters",  "RESET_COUNTERS", "Reset length, revolutions and layers to zero?"},
+  [FM_ACT_MOTORS_OFF]     = {ICON_DISABLE_STEPPERS, "Motors off", "Motors off",      "MOTORS_OFF",     "Switch the motors off? The winder must be homed again."},
 };
 
 static FM_ACTION fmPendingAction = FM_ACT_NONE;
@@ -62,7 +63,7 @@ static void fmDialog(DIALOG_TYPE type, const char * title, const char * msg, boo
 {
   _setDialogTitleStr((uint8_t *)title);
   _setDialogMsgStr((uint8_t *)msg);
-  _setDialogOkTextLabel(question ? LABEL_CONFIRM : LABEL_CONFIRM);
+  _setDialogOkTextLabel(LABEL_CONFIRM);
   _setDialogCancelTextLabel(question ? LABEL_CANCEL : LABEL_NULL);
   showDialog(type, ok_action, NULL, NULL);
 }
@@ -78,7 +79,7 @@ static void fmRunAction(FM_ACTION action, bool forceConfirm)
   fmPendingAction = action;
 
   if (def->confirm != NULL && forceConfirm)
-    fmDialog(DIALOG_TYPE_QUESTION, def->label, def->confirm, true, fmSendPending);
+    fmDialog(DIALOG_TYPE_QUESTION, def->title, def->confirm, true, fmSendPending);
   else
     fmSendPending();
 }
@@ -199,6 +200,9 @@ static void fmTempText(char * buf, uint8_t size, int16_t deci)
 // one live tile: icon, title (top right) and value (center); the icon is only redrawn when the text width changes
 static void fmDrawTile(uint8_t index, uint16_t icon, const char * title, const char * value, bool force)
 {
+  if (value == NULL)  // tile without a value line (buffer: the bar is drawn there)
+    value = "";
+
   if (!force && strcmp(fmTileText[index], value) == 0)
     return;
 
@@ -217,7 +221,7 @@ static void fmDrawTile(uint8_t index, uint16_t icon, const char * title, const c
   lv.lines[0].text_mode = GUI_TEXTMODE_TRANS;
   lv.lines[0].text = (uint8_t *)title;
 
-  lv.enabled[1] = true;
+  lv.enabled[1] = (value[0] != '\0');
   lv.lines[1].h_align = CENTER;
   lv.lines[1].v_align = CENTER;
   lv.lines[1].pos = (GUI_POINT){SS_ICON_WIDTH / 2, SS_ICON_VAL_Y0};
@@ -244,11 +248,12 @@ static void fmDrawBufferBar(void)
 
   fmBarShown = pos;
 
+  // in the value row (below the icon graphic, above the colored underline)
   const GUI_RECT * r = &rect_of_key[3];
-  const int16_t segW = 14, gap = 2;
+  const int16_t segW = 14, gap = 3;
   const int16_t total = 5 * segW + 4 * gap;
   const int16_t x0 = r->x0 + ((r->x1 - r->x0) - total) / 2;
-  const int16_t y0 = r->y0 + 32, y1 = r->y0 + 44;
+  const int16_t y0 = r->y0 + SS_ICON_VAL_Y0 - 7, y1 = r->y0 + SS_ICON_VAL_Y0 + 7;
 
   for (int8_t i = 0; i < 5; i++)
   {
@@ -278,15 +283,14 @@ static void fmDrawTiles(bool force)
   else
     snprintf(v, sizeof(v), "--");
 
-  fmDrawTile(2, ICON_STATUS_SPEED, "Speed", v, force);
+  // titles: max 3 characters, the icon graphic fills the left part of the tile (like the stock "Sp." / "Fr.")
+  fmDrawTile(2, ICON_STATUS_SPEED, "Sp.", v, force);
+  fmDrawTile(3, ICON_STATUS_FLOW, "Buf", fmOnline() && fmStatus.buffer >= 0 ? NULL : "--", force);
 
-  if (fmOnline() && fmStatus.buffer >= 0)
-    snprintf(v, sizeof(v), "%d/4", fmStatus.buffer);
+  if (fmTileText[3][0] == '\0')
+    fmDrawBufferBar();
   else
-    snprintf(v, sizeof(v), "--");
-
-  fmDrawTile(3, ICON_STATUS_FLOW, "Buffer", v, force);
-  fmDrawBufferBar();
+    fmBarShown = -2;
 }
 
 static void fmDrawStrip(void)
@@ -576,7 +580,7 @@ void menuFmMore(void)
   fmSetItem(&fmMoreItems.items[0], FM_ACT_RESET_COUNTERS);
   fmSetItem(&fmMoreItems.items[1], FM_ACT_MOTORS_OFF);
   fmSetItem(&fmMoreItems.items[2], FM_ACT_CLEAR);
-  fmMoreItems.items[4].label.address = "TFT settings";
+  fmMoreItems.items[4].label.address = "TFT setup";
 
   menuDrawPage(&fmMoreItems);
 
