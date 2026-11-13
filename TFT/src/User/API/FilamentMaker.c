@@ -56,8 +56,18 @@ bool fmIsActive(void)
 
 static void fmRequestReport(void)
 {
-  if (storeCmd("FM_REPORT S%d\n", FM_REPORT_PERIOD_S))
-    fmLastRequestMs = OS_GetTimeMs();
+  // count the attempt even when the queue is full: retrying on every loop pass
+  // would flash the "Busy processing" toast continuously
+  fmLastRequestMs = OS_GetTimeMs();
+
+  char cmd[24];
+
+  snprintf(cmd, sizeof(cmd), "FM_REPORT S%d\n", FM_REPORT_PERIOD_S);
+
+  if (isFullCmdQueue() || isEnqueued(cmd))  // full: no toast; queued: one request is enough
+    return;
+
+  storeCmd("%s", cmd);
 }
 
 void fmDetected(void)
