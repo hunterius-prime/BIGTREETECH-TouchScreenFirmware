@@ -446,7 +446,7 @@ void menuFmStatus(void)
         break;
 
       case KEY_ICON_3:
-        fmOpenGroup("Buffer");
+        fmOpenGroup("Standalone");  // speed per buffer position
         break;
 
       case KEY_ICON_4:
@@ -628,7 +628,7 @@ void menuFmMore(void)
 
 // ============================================================================ settings
 
-static const char * const fmGroups[] = {"Process", "Temperature", "Spool", "Winder", "Buffer", "System"};
+static const char * const fmGroups[] = {"Process", "Spool", "Temperature", "Motion", "Standalone"};  // ESP32 PARAM_GROUPS
 #define FM_GROUP_COUNT COUNT(fmGroups)
 
 static void fmLoadGroupItem(LISTITEM * item, uint16_t index, uint8_t itemPos)
