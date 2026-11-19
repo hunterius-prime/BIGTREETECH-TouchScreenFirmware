@@ -141,13 +141,17 @@
 #endif
 
 // ST7920 Emulator SPI pins
-#define ST7920_EMULATOR  // uncomment to enable Marlin mode
+#ifndef TURTLE_FM  // Turtle FilamentMaker: no Marlin mode
+  #define ST7920_EMULATOR  // uncomment to enable Marlin mode
+#endif
 #ifdef ST7920_EMULATOR
   #define ST7920_SPI _SPI2
 #endif
 
 // HD44780 Emulator pins
-#define LCD2004_EMULATOR
+#ifndef TURTLE_FM  // Turtle FilamentMaker: no Marlin mode
+  #define LCD2004_EMULATOR
+#endif
 #ifdef LCD2004_EMULATOR
   #define LCD_EN      PB15
   #define LCD_RS      PB12

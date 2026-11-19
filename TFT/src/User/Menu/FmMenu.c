@@ -557,6 +557,71 @@ void menuFmMenu(void)
   }
 }
 
+// TFT setup: only the screen's own settings (the stock Settings menu is mostly printer settings)
+static void fmResetTftSettings(void)
+{
+  initSettings();
+  storePara();
+  popupReminder(DIALOG_TYPE_SUCCESS, LABEL_INFO, LABEL_SETTINGS_RESET_DONE);
+}
+
+void menuFmTftSetup(void)
+{
+  MENUITEMS fmTftItems = {
+    // title
+    {.address = "TFT setup"},
+    // icon                          label
+    {
+      {ICON_SCREEN_SETTINGS,         LABEL_SCREEN_SETTINGS},
+      {ICON_CONNECTION_SETTINGS,     LABEL_CONNECTION_SETTINGS},
+      {ICON_SCREEN_INFO,             LABEL_SCREEN_INFO},
+      {ICON_EEPROM_RESET,            LABEL_SETTINGS_RESET},
+      {ICON_NULL,                    LABEL_NULL},
+      {ICON_NULL,                    LABEL_NULL},
+      {ICON_NULL,                    LABEL_NULL},
+      {ICON_BACK,                    LABEL_BACK},
+    }
+  };
+
+  KEY_VALUES key_num;
+
+  menuDrawPage(&fmTftItems);
+
+  while (MENU_IS(menuFmTftSetup))
+  {
+    key_num = menuKeyGetValue();
+
+    switch (key_num)
+    {
+      case KEY_ICON_0:
+        OPEN_MENU(menuScreenSettings);  // rotation, touch calibration, language, UI, sound, brightness
+        break;
+
+      case KEY_ICON_1:
+        OPEN_MENU(menuConnectionSettings);
+        break;
+
+      case KEY_ICON_2:
+        OPEN_MENU(menuInfo);
+        break;
+
+      case KEY_ICON_3:
+        popupDialog(DIALOG_TYPE_ALERT, LABEL_SETTINGS_RESET, LABEL_SETTINGS_RESET_INFO, LABEL_CONFIRM, LABEL_CANCEL,
+                    fmResetTftSettings, NULL, NULL);
+        break;
+
+      case KEY_ICON_7:
+        CLOSE_MENU();
+        break;
+
+      default:
+        break;
+    }
+
+    loopProcess();
+  }
+}
+
 void menuFmMore(void)
 {
   static MENUITEMS fmMoreItems = {
@@ -607,7 +672,7 @@ void menuFmMore(void)
         break;
 
       case KEY_ICON_4:
-        OPEN_MENU(menuSettings);
+        OPEN_MENU(menuFmTftSetup);
         break;
 
       case KEY_ICON_5:

@@ -13,6 +13,7 @@ void menuFmMore(void);
 void menuFmSettings(void);  // settings groups
 void menuFmGroup(void);     // settings of one group (list)
 void menuFmEditParam(void); // one numeric setting: knob, - / +, keypad; knob press saves
+void menuFmTftSetup(void);  // screen, connection, TFT info, reset TFT settings
 void menuFmInfo(void);      // controller / worker / network info
 
 #ifdef __cplusplus
