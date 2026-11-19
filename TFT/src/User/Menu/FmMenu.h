@@ -11,7 +11,8 @@ void menuFmStatus(void);    // home screen: temperatures, speed, buffer, counter
 void menuFmMenu(void);      // main menu
 void menuFmMore(void);
 void menuFmSettings(void);  // settings groups
-void menuFmGroup(void);     // settings of one group (list + numpad)
+void menuFmGroup(void);     // settings of one group (list)
+void menuFmEditParam(void); // one numeric setting: knob, - / +, keypad; knob press saves
 void menuFmInfo(void);      // controller / worker / network info
 
 #ifdef __cplusplus

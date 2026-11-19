@@ -721,6 +721,8 @@ static void fmLoadParamItem(LISTITEM * item, uint16_t index, uint8_t itemPos)
   setDynamicTextValue(itemPos, v);
 }
 
+static uint8_t fmEditIndex = 0;  // parameter opened in menuFmEditParam
+
 static void fmEditParam(uint8_t index)
 {
   FM_PARAM * p = fmParam(index);
@@ -741,46 +743,8 @@ static void fmEditParam(uint8_t index)
     return;
   }
 
-  char title[48];
-  int32_t raw;
-
-  if (p->unit[0] != '\0')
-    snprintf(title, sizeof(title), "%s (%s)", p->label, p->unit);
-  else
-    snprintf(title, sizeof(title), "%s", p->label);
-
-  if (p->decimals == 0)
-  {
-    raw = numPadInt((uint8_t *)title, p->value, p->def, p->min < 0);
-  }
-  else
-  {
-    double scale = 1;
-
-    for (uint8_t i = 0; i < p->decimals; i++)
-      scale *= 10;
-
-    double v = numPadFloat((uint8_t *)title, p->value / scale, p->def / scale, p->min < 0);
-
-    raw = (int32_t)(v * scale + (v >= 0 ? 0.5 : -0.5));
-  }
-
-  if (raw == p->value)
-    return;
-
-  if (raw < p->min || raw > p->max)
-  {
-    static char msg[64];
-    char lo[16], hi[16];
-
-    fmFormatRaw(lo, sizeof(lo), p->min, p->decimals);
-    fmFormatRaw(hi, sizeof(hi), p->max, p->decimals);
-    snprintf(msg, sizeof(msg), "Allowed range: %s .. %s %s", lo, hi, p->unit);
-    fmDialog(DIALOG_TYPE_ERROR, p->label, msg, false, NULL);
-    return;
-  }
-
-  fmSetParam(index, raw);
+  fmEditIndex = index;
+  OPEN_MENU(menuFmEditParam);
 }
 
 void menuFmGroup(void)
@@ -831,6 +795,299 @@ void menuFmGroup(void)
     {
       serial = fmParamSerial();
       listViewRefreshPage();
+    }
+
+    loopProcess();
+  }
+}
+
+// ============================================================================ value editor (knob)
+
+// One numeric setting, edited with the knob, the - / + icons or the keypad (tap the value).
+// Nothing is sent until Save (icon or a short press on the knob); Back leaves without sending.
+// The value always stays inside the controller's min .. max.
+
+#define FM_EDIT_FAST_MS    40    // detents closer than this: fast turn
+#define FM_EDIT_MEDIUM_MS  90    // detents closer than this: medium turn
+#define FM_EDIT_FAST_MUL   10
+#define FM_EDIT_MEDIUM_MUL 3
+#define FM_EDIT_MAX_STEPS  1000  // initial step: smallest power of ten giving at most this many steps over the range
+
+// draws a text centered in a horizontal band of the value area, cut to the band width
+static void fmEditBand(int16_t y0, int16_t y1, const char * text, uint16_t color, bool large)
+{
+  char buf[32];
+  uint8_t maxChars = (exhibitRect.x1 - exhibitRect.x0) / (large ? LARGE_BYTE_WIDTH : BYTE_WIDTH);
+
+  if (maxChars >= sizeof(buf))
+    maxChars = sizeof(buf) - 1;
+
+  snprintf(buf, maxChars + 1, "%s", text);
+
+  GUI_ClearRect(exhibitRect.x0, y0, exhibitRect.x1, y1);
+  GUI_SetColor(color);
+
+  if (large)
+    setFontSize(FONT_SIZE_LARGE);
+
+  GUI_DispStringInRect(exhibitRect.x0, y0, exhibitRect.x1, y1, (uint8_t *)buf);
+
+  setFontSize(FONT_SIZE_NORMAL);
+  GUI_RestoreColorDefault();
+}
+
+// value area: "min..max unit" / new value (highlighted when changed) / "Now <controller value>"
+static void fmEditDraw(const FM_PARAM * p, int32_t value, bool all)
+{
+  char a[16], b[16], line[48];
+  int16_t valueY0 = exhibitRect.y0 + BYTE_HEIGHT;
+  int16_t valueY1 = exhibitRect.y1 - BYTE_HEIGHT;
+
+  if (all)
+  {
+    fmFormatRaw(a, sizeof(a), p->min, p->decimals);
+    fmFormatRaw(b, sizeof(b), p->max, p->decimals);
+    snprintf(line, sizeof(line), "%s..%s %s", a, b, p->unit);
+    fmEditBand(exhibitRect.y0, valueY0, line, infoSettings.font_color, false);
+
+    fmFormatRaw(a, sizeof(a), p->value, p->decimals);
+    snprintf(line, sizeof(line), "Now %s", a);
+    fmEditBand(valueY1, exhibitRect.y1, line, infoSettings.font_color, false);
+  }
+
+  fmFormatRaw(a, sizeof(a), value, p->decimals);
+  fmEditBand(valueY0, valueY1, a, value != p->value ? infoSettings.reminder_color : infoSettings.font_color, true);
+}
+
+static int32_t fmEditClamp(const FM_PARAM * p, int64_t value)
+{
+  if (value < p->min)
+    return p->min;
+
+  if (value > p->max)
+    return p->max;
+
+  return (int32_t)value;
+}
+
+// step icon and label, e.g. "Step 0.01" (icon labels show 9 characters)
+static void fmEditSetStepItem(ITEM * item, char * label, uint8_t size, const FM_PARAM * p, int32_t step, uint8_t tier)
+{
+  char v[16];
+
+  fmFormatRaw(v, sizeof(v), step, p->decimals);
+
+  if (strlen(v) <= 4)
+    snprintf(label, size, "Step %s", v);
+  else
+    snprintf(label, size, "%s", v);
+
+  item->icon = tier == 0 ? ICON_SLOW_SPEED : (tier == 1 ? ICON_NORMAL_SPEED : ICON_FAST_SPEED);
+  item->label.address = label;
+}
+
+void menuFmEditParam(void)
+{
+  static char title[FM_LABEL_LEN];
+  static char stepLabel[16];
+
+  MENUITEMS editItems = {
+    // title
+    {.address = title},
+    // icon                label
+    {
+      {ICON_DEC,           LABEL_DEC},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_INC,           LABEL_INC},
+      {ICON_SLOW_SPEED,    LABEL_NULL},
+      {ICON_RESET_VALUE,   LABEL_NULL},
+      {ICON_APPLY,         LABEL_NULL},
+      {ICON_BACK,          LABEL_BACK},
+    }
+  };
+
+  FM_PARAM * p = fmParam(fmEditIndex);
+
+  if (p == NULL || fmOptionCount(p->options) > 0)
+  {
+    CLOSE_MENU();
+    return;
+  }
+
+  int64_t range = (int64_t)p->max - p->min;
+  int32_t value = fmEditClamp(p, p->value);
+  int32_t step = 1;
+  uint8_t stepTier = 0;
+  uint32_t serial = fmParamSerial();
+  KEY_VALUES key_num;
+
+  #if LCD_ENCODER_SUPPORT
+    uint32_t lastTurnMs = 0;
+  #endif
+
+  while (range / step > FM_EDIT_MAX_STEPS)
+  {
+    step *= 10;
+    stepTier++;
+  }
+
+  editItems.items[KEY_ICON_5].label.address = (void *)"Default";
+  editItems.items[KEY_ICON_6].label.address = (void *)"Save";
+  snprintf(title, sizeof(title), "%s", p->label);
+  fmEditSetStepItem(&editItems.items[KEY_ICON_4], stepLabel, sizeof(stepLabel), p, step, stepTier);
+
+  menuDrawPage(&editItems);
+  fmEditDraw(p, value, true);
+
+  #if LCD_ENCODER_SUPPORT
+    LCD_Enc_ResetClick();  // a press still held from before does not save
+  #endif
+
+  while (MENU_IS(menuFmEditParam))
+  {
+    int32_t newValue = value;
+    bool save = false;
+
+    #if LCD_ENCODER_SUPPORT
+      int16_t detents = encoderPosition;  // read before menuKeyGetValue(), which folds all detents into one key
+
+      encoderPosition = 0;
+
+      if (detents != 0)
+      {
+        uint32_t now = OS_GetTimeMs();
+        int32_t mul = 1;
+
+        if (now - lastTurnMs < FM_EDIT_FAST_MS)
+          mul = FM_EDIT_FAST_MUL;
+        else if (now - lastTurnMs < FM_EDIT_MEDIUM_MS)
+          mul = FM_EDIT_MEDIUM_MUL;
+
+        lastTurnMs = now;
+        newValue = fmEditClamp(p, (int64_t)value + (int64_t)detents * step * mul);
+      }
+
+      if (LCD_Enc_ReadClick())
+        save = true;
+    #endif
+
+    key_num = menuKeyGetValue();
+
+    switch (key_num)
+    {
+      case KEY_ICON_0:
+      case KEY_DECREASE:
+        newValue = fmEditClamp(p, (int64_t)value - step);
+        break;
+
+      case KEY_ICON_3:
+      case KEY_INCREASE:
+        newValue = fmEditClamp(p, (int64_t)value + step);
+        break;
+
+      case KEY_ICON_4:  // step 1, 10, 100 .. (raw units) while the range holds at least 10 steps, then back to 1
+        if ((int64_t)step * 10 * 10 <= range)
+        {
+          step *= 10;
+          stepTier++;
+        }
+        else
+        {
+          step = 1;
+          stepTier = 0;
+        }
+
+        fmEditSetStepItem(&editItems.items[KEY_ICON_4], stepLabel, sizeof(stepLabel), p, step, stepTier);
+        menuDrawItem(&editItems.items[KEY_ICON_4], KEY_ICON_4);
+        break;
+
+      case KEY_ICON_5:
+        newValue = fmEditClamp(p, p->def);
+        break;
+
+      case KEY_ICON_6:
+        save = true;
+        break;
+
+      case KEY_INFOBOX:  // tap on the value: keypad
+      {
+        char numTitle[48];
+        int64_t typed;
+
+        if (p->unit[0] != '\0')
+          snprintf(numTitle, sizeof(numTitle), "%s (%s)", p->label, p->unit);
+        else
+          snprintf(numTitle, sizeof(numTitle), "%s", p->label);
+
+        if (p->decimals == 0)
+        {
+          typed = numPadInt((uint8_t *)numTitle, value, p->def, p->min < 0);
+        }
+        else
+        {
+          double scale = 1;
+
+          for (uint8_t i = 0; i < p->decimals; i++)
+            scale *= 10;
+
+          double v = numPadFloat((uint8_t *)numTitle, value / scale, p->def / scale, p->min < 0);
+
+          typed = (int64_t)(v * scale + (v >= 0 ? 0.5 : -0.5));
+        }
+
+        value = fmEditClamp(p, typed);
+        newValue = value;
+
+        if (value != typed)
+          addToast(DIALOG_TYPE_INFO, "Limited to the allowed range");
+
+        menuDrawPage(&editItems);
+        fmEditDraw(p, value, true);
+
+        #if LCD_ENCODER_SUPPORT
+          encoderPosition = 0;   // turns while the keypad was open
+          LCD_Enc_ResetClick();
+        #endif
+        break;
+      }
+
+      case KEY_ICON_7:
+        CLOSE_MENU();
+        break;
+
+      default:
+        break;
+    }
+
+    if (newValue != value)
+    {
+      value = newValue;
+      fmEditDraw(p, value, false);
+    }
+
+    if (save)
+    {
+      if (value != p->value)
+        fmSetParam(fmEditIndex, value);
+
+      BUZZER_PLAY(SOUND_OK);
+      CLOSE_MENU();
+      break;
+    }
+
+    if (serial != fmParamSerial())  // FM_V: the value on the controller changed
+    {
+      serial = fmParamSerial();
+      p = fmParam(fmEditIndex);
+
+      if (p == NULL)
+      {
+        CLOSE_MENU();
+        break;
+      }
+
+      fmEditDraw(p, value, true);
     }
 
     loopProcess();

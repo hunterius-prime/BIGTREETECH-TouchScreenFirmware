@@ -935,7 +935,8 @@ void menuDrawPage(const MENUITEMS * menuItems)
              (MENU_IS(menuZOffset)) ||
              (MENU_IS(menuMBL)) ||
              (MENU_IS(menuBabystep)) ||
-             (MENU_IS(menuMeshEditor)))
+             (MENU_IS(menuMeshEditor)) ||
+             (MENU_IS(menuFmEditParam)))  // Turtle FilamentMaker
       curRect = rect_of_keysIN;
     else
       curRect = rect_of_key;
@@ -1121,7 +1122,8 @@ KEY_VALUES menuKeyGetValue(void)
                  (MENU_IS(menuZOffset)) ||
                  (MENU_IS(menuMBL)) ||
                  (MENU_IS(menuBabystep)) ||
-                 (MENU_IS(menuMeshEditor)))
+                 (MENU_IS(menuMeshEditor)) ||
+                 (MENU_IS(menuFmEditParam)))  // Turtle FilamentMaker
         {
           tempkey = (KEY_VALUES)KEY_GetValue(COUNT(rect_of_keysIN), rect_of_keysIN);
         }

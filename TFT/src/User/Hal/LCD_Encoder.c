@@ -68,6 +68,50 @@ bool LCD_Enc_ReadBtn(uint16_t duration)
   return true;
 }
 
+// short press ("click") detection, used by screens that confirm with the knob button.
+// The click is reported on release, so it never collides with the long press of the mode switching
+// (MODE_SWITCHING_INTERVAL): a press held that long gives no click.
+static bool encoderClickDown = false;     // button seen pressed
+static bool encoderClickBlocked = false;  // press in progress when the screen started: ignore it
+static uint32_t encoderClickStart = 0;
+
+void LCD_Enc_ResetClick(void)
+{
+  encoderClickDown = false;
+  encoderClickBlocked = !GPIO_GetLevel(LCD_BTN_PIN);
+}
+
+bool LCD_Enc_ReadClick(void)
+{
+  bool pressed = !GPIO_GetLevel(LCD_BTN_PIN);
+
+  if (encoderClickBlocked)
+  {
+    encoderClickBlocked = pressed;
+    return false;
+  }
+
+  if (pressed)
+  {
+    if (!encoderClickDown)
+    {
+      encoderClickDown = true;
+      encoderClickStart = OS_GetTimeMs();
+    }
+
+    return false;
+  }
+
+  if (!encoderClickDown)
+    return false;
+
+  encoderClickDown = false;
+
+  uint32_t held = OS_GetTimeMs() - encoderClickStart;
+
+  return held >= LCD_ENC_BUTTON_INTERVAL && held < MODE_SWITCHING_INTERVAL;
+}
+
 uint8_t LCD_Enc_ReadPos(void)
 {
   uint8_t pos = 0;
