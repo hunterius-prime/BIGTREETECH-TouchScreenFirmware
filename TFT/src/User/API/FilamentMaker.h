@@ -68,6 +68,8 @@ typedef struct
   int16_t  temp1;       // 0.1 C, FM_TEMP_INVALID = no sensor
   int16_t  temp2;
   bool     simulated;   // the worker is simulated by the controller
+  int8_t   feederDir;   // force feeder: 1 forward, -1 reverse, 0 stopped
+  int32_t  feederRpm100;  // force feeder speed setting, 0.01 rpm
 } FM_STATUS;
 
 typedef struct

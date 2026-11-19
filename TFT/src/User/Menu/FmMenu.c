@@ -133,7 +133,8 @@ static void fmBuildTitle(char * buf, uint8_t size)
   else if (!fmStatus.valid)
     snprintf(buf, size, "FilamentMaker - waiting");
   else
-    snprintf(buf, size, "%s%s", fmStateText(fmStatus.state), fmStatus.simulated ? "  [SIM]" : "");
+    snprintf(buf, size, "%s%s%s", fmStateText(fmStatus.state), fmStatus.simulated ? "  [SIM]" : "",
+             fmStatus.feederDir > 0 ? "  Feed >" : (fmStatus.feederDir < 0 ? "  Feed <" : ""));
 }
 
 static void fmActionsFor(FM_ACTION * a4, FM_ACTION * a5)
@@ -493,8 +494,8 @@ void menuFmMenu(void)
       {ICON_NULL,                    LABEL_NULL},
       {ICON_NULL,                    LABEL_NULL},
       {ICON_FAN,                     LABEL_FAN},
+      {ICON_FEEDER,                  LABEL_NULL},
       {ICON_PARAMETER,               LABEL_NULL},
-      {ICON_SCREEN_INFO,             LABEL_NULL},
       {ICON_MORE,                    LABEL_MORE},
       {ICON_BACK,                    LABEL_BACK},
     }
@@ -506,8 +507,8 @@ void menuFmMenu(void)
   fmSetItem(&fmMenuItems.items[0], FM_ACT_HOME);
   fmSetItem(&fmMenuItems.items[1], FM_ACT_START_NOWIND);
   fmSetItem(&fmMenuItems.items[2], FM_ACT_PAUSE_NOW);
-  fmMenuItems.items[4].label.address = "Settings";
-  fmMenuItems.items[5].label.address = "Info";
+  fmMenuItems.items[4].label.address = "Feeder";
+  fmMenuItems.items[5].label.address = "Settings";
 
   menuDrawPage(&fmMenuItems);
 
@@ -534,11 +535,11 @@ void menuFmMenu(void)
         break;
 
       case KEY_ICON_4:
-        OPEN_MENU(menuFmSettings);
+        OPEN_MENU(menuFmFeeder);
         break;
 
       case KEY_ICON_5:
-        OPEN_MENU(menuFmInfo);
+        OPEN_MENU(menuFmSettings);
         break;
 
       case KEY_ICON_6:
@@ -635,7 +636,7 @@ void menuFmMore(void)
       {ICON_GCODE,                   LABEL_TERMINAL},
       {ICON_SETTINGS,                LABEL_NULL},
       {ICON_CUSTOM,                  LABEL_CUSTOM},
-      {ICON_NULL,                    LABEL_NULL},
+      {ICON_SCREEN_INFO,             LABEL_NULL},
       {ICON_BACK,                    LABEL_BACK},
     }
   };
@@ -646,6 +647,7 @@ void menuFmMore(void)
   fmSetItem(&fmMoreItems.items[1], FM_ACT_MOTORS_OFF);
   fmSetItem(&fmMoreItems.items[2], FM_ACT_CLEAR);
   fmMoreItems.items[4].label.address = "TFT setup";
+  fmMoreItems.items[6].label.address = "Info";
 
   menuDrawPage(&fmMoreItems);
 
@@ -679,6 +681,10 @@ void menuFmMore(void)
         OPEN_MENU(menuCustom);
         break;
 
+      case KEY_ICON_6:
+        OPEN_MENU(menuFmInfo);
+        break;
+
       case KEY_ICON_7:
         CLOSE_MENU();
         break;
@@ -693,7 +699,7 @@ void menuFmMore(void)
 
 // ============================================================================ settings
 
-static const char * const fmGroups[] = {"Process", "Spool", "Temperature", "Motion", "Standalone"};  // ESP32 PARAM_GROUPS
+static const char * const fmGroups[] = {"Process", "Spool", "Temperature", "Motion", "Standalone", "Feeder"};  // ESP32 PARAM_GROUPS
 #define FM_GROUP_COUNT COUNT(fmGroups)
 
 static void fmLoadGroupItem(LISTITEM * item, uint16_t index, uint8_t itemPos)
@@ -1157,6 +1163,260 @@ void menuFmEditParam(void)
 
     loopProcess();
   }
+}
+
+// ============================================================================ feeder
+
+// Force feeder (Melzi Z driver), independent of spooling. Speed = controller setting FeederSpeed
+// (0.01 rpm, stored on the ESP32 and the Melzi SD card). Knob / - + change the speed: shown at once
+// (highlighted), sent FM_FEEDER_SEND_MS after the last change (not on every detent: every FM_SET
+// writes the ESP32 flash and the Melzi SD card). Knob press = Start / Stop.
+
+#define FM_FEEDER_MIN       1     // 0.01 rpm
+#define FM_FEEDER_MAX       1000  // 10.00 rpm
+#define FM_FEEDER_SEND_MS   800
+#define FM_FEEDER_FAST_MS   40
+#define FM_FEEDER_FAST_MUL  10
+
+static void fmFeederSetSpeed(int32_t rpm100)
+{
+  mustStoreCmd("FM_SET FeederSpeed %ld\n", (long)rpm100);
+  fmStatus.feederRpm100 = rpm100;  // shown until the next FM: line confirms it
+}
+
+static void fmFeederRun(int8_t dir)
+{
+  fmCommand(dir == 0 ? "FEEDER_STOP" : (dir > 0 ? "FEEDER_START" : "FEEDER_REVERSE"));
+  fmStatus.feederDir = dir;  // optimistic, the next FM: line confirms it
+}
+
+// value area: "Feeder  rpm" / speed (highlighted while not sent) / direction
+static void fmFeederDraw(int32_t rpm100, bool pending)
+{
+  char a[16];
+  const char * state;
+  uint16_t stateColor = infoSettings.font_color;
+  int16_t valueY0 = exhibitRect.y0 + BYTE_HEIGHT;
+  int16_t valueY1 = exhibitRect.y1 - BYTE_HEIGHT;
+
+  fmEditBand(exhibitRect.y0, valueY0, "Speed rpm", infoSettings.font_color, false);
+
+  fmFormatRaw(a, sizeof(a), rpm100, 2);
+  fmEditBand(valueY0, valueY1, a, pending ? infoSettings.reminder_color : infoSettings.font_color, true);
+
+  if (!fmOnline())
+  {
+    state = "offline";
+  }
+  else if (fmStatus.feederDir > 0)
+  {
+    state = "> forward >";
+    stateColor = MAT_GREEN;
+  }
+  else if (fmStatus.feederDir < 0)
+  {
+    state = "< reverse <";
+    stateColor = MAT_ORANGE;
+  }
+  else
+  {
+    state = "stopped";
+  }
+
+  fmEditBand(valueY1, exhibitRect.y1, state, stateColor, false);
+}
+
+static void fmFeederRunItems(MENUITEMS * items)
+{
+  if (fmStatus.feederDir != 0)
+  {
+    items->items[KEY_ICON_4].icon = ICON_STOP;
+    items->items[KEY_ICON_4].label.address = (void *)"Stop";
+  }
+  else
+  {
+    items->items[KEY_ICON_4].icon = ICON_RESUME;
+    items->items[KEY_ICON_4].label.address = (void *)"Start";
+  }
+}
+
+void menuFmFeeder(void)
+{
+  static char stepLabel[16];
+  static const int32_t steps[] = {1, 10, 100};  // 0.01 / 0.10 / 1.00 rpm
+
+  MENUITEMS feederItems = {
+    // title
+    {.address = "Feeder"},
+    // icon                label
+    {
+      {ICON_DEC,           LABEL_DEC},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_INC,           LABEL_INC},
+      {ICON_RESUME,        LABEL_NULL},
+      {ICON_ROTATE_UI,     LABEL_NULL},
+      {ICON_NORMAL_SPEED,  LABEL_NULL},
+      {ICON_BACK,          LABEL_BACK},
+    }
+  };
+
+  static uint8_t stepIdx = 1;
+  int32_t speed = fmStatus.feederRpm100 >= FM_FEEDER_MIN ? fmStatus.feederRpm100 : 100;
+  int32_t sent = speed;
+  uint32_t changedMs = 0;
+  int8_t shownDir = fmStatus.feederDir;
+  bool shownOnline = fmOnline();
+  uint32_t lastUpdate = fmStatus.updatedMs;
+  KEY_VALUES key_num;
+
+  #if LCD_ENCODER_SUPPORT
+    uint32_t lastTurnMs = 0;
+  #endif
+
+  feederItems.items[KEY_ICON_5].label.address = (void *)"Reverse";
+  fmFeederRunItems(&feederItems);
+  fmEditSetStepItem(&feederItems.items[KEY_ICON_6], stepLabel, sizeof(stepLabel), &(FM_PARAM){.decimals = 2},
+                    steps[stepIdx], stepIdx);
+
+  menuDrawPage(&feederItems);
+  fmFeederDraw(speed, false);
+
+  #if LCD_ENCODER_SUPPORT
+    LCD_Enc_ResetClick();
+  #endif
+
+  while (MENU_IS(menuFmFeeder))
+  {
+    int32_t newSpeed = speed;
+    bool toggle = false;
+
+    #if LCD_ENCODER_SUPPORT
+      int16_t detents = encoderPosition;  // read before menuKeyGetValue(), which folds all detents into one key
+
+      encoderPosition = 0;
+
+      if (detents != 0)
+      {
+        uint32_t now = OS_GetTimeMs();
+        int32_t mul = (now - lastTurnMs < FM_FEEDER_FAST_MS) ? FM_FEEDER_FAST_MUL : 1;
+
+        lastTurnMs = now;
+        newSpeed = speed + (int32_t)detents * steps[stepIdx] * mul;
+      }
+
+      if (LCD_Enc_ReadClick())
+        toggle = true;
+    #endif
+
+    key_num = menuKeyGetValue();
+
+    switch (key_num)
+    {
+      case KEY_ICON_0:
+      case KEY_DECREASE:
+        newSpeed = speed - steps[stepIdx];
+        break;
+
+      case KEY_ICON_3:
+      case KEY_INCREASE:
+        newSpeed = speed + steps[stepIdx];
+        break;
+
+      case KEY_ICON_4:
+        toggle = true;
+        break;
+
+      case KEY_ICON_5:
+        fmFeederRun(fmStatus.feederDir < 0 ? 1 : -1);
+        break;
+
+      case KEY_ICON_6:
+        stepIdx = (stepIdx + 1) % COUNT(steps);
+        fmEditSetStepItem(&feederItems.items[KEY_ICON_6], stepLabel, sizeof(stepLabel), &(FM_PARAM){.decimals = 2},
+                          steps[stepIdx], stepIdx);
+        menuDrawItem(&feederItems.items[KEY_ICON_6], KEY_ICON_6);
+        break;
+
+      case KEY_INFOBOX:  // tap on the value: keypad
+      {
+        double v = numPadFloat((uint8_t *)"Feeder speed (rpm)", speed / 100.0, 1.0, false);
+        int32_t typed = (int32_t)(v * 100 + 0.5);
+
+        newSpeed = typed;
+
+        if (typed < FM_FEEDER_MIN || typed > FM_FEEDER_MAX)
+          addToast(DIALOG_TYPE_INFO, "Feeder speed 0.01 .. 10 rpm");
+
+        menuDrawPage(&feederItems);
+        fmFeederDraw(speed, speed != sent);
+
+        #if LCD_ENCODER_SUPPORT
+          encoderPosition = 0;
+          LCD_Enc_ResetClick();
+        #endif
+        break;
+      }
+
+      case KEY_ICON_7:
+        CLOSE_MENU();
+        break;
+
+      default:
+        break;
+    }
+
+    if (newSpeed < FM_FEEDER_MIN)
+      newSpeed = FM_FEEDER_MIN;
+    else if (newSpeed > FM_FEEDER_MAX)
+      newSpeed = FM_FEEDER_MAX;
+
+    if (newSpeed != speed)
+    {
+      speed = newSpeed;
+      changedMs = OS_GetTimeMs();
+      fmFeederDraw(speed, speed != sent);
+    }
+
+    if (toggle)
+      fmFeederRun(fmStatus.feederDir != 0 ? 0 : 1);
+
+    // send the speed after the knob / keys rest, or at once when leaving
+    if (speed != sent && (OS_GetTimeMs() - changedMs >= FM_FEEDER_SEND_MS || MENU_IS_NOT(menuFmFeeder)))
+    {
+      fmFeederSetSpeed(speed);
+      sent = speed;
+      fmFeederDraw(speed, false);
+    }
+
+    // run state / connection changed (FM: line or own command)
+    if (fmStatus.feederDir != shownDir || fmOnline() != shownOnline)
+    {
+      shownDir = fmStatus.feederDir;
+      shownOnline = fmOnline();
+      fmFeederRunItems(&feederItems);
+      menuDrawItem(&feederItems.items[KEY_ICON_4], KEY_ICON_4);
+      fmFeederDraw(speed, speed != sent);
+    }
+
+    // speed changed elsewhere (web, Home Assistant) while nothing is pending here
+    if (fmStatus.updatedMs != lastUpdate)
+    {
+      lastUpdate = fmStatus.updatedMs;
+
+      if (speed == sent && fmStatus.feederRpm100 >= FM_FEEDER_MIN && fmStatus.feederRpm100 != speed &&
+          OS_GetTimeMs() - changedMs > 3000)
+      {
+        speed = sent = fmStatus.feederRpm100;
+        fmFeederDraw(speed, false);
+      }
+    }
+
+    loopProcess();
+  }
+
+  if (speed != sent)  // left by another screen (popup, mode change) before the speed was sent
+    fmFeederSetSpeed(speed);
 }
 
 // ============================================================================ info

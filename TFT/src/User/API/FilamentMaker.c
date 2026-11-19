@@ -166,6 +166,8 @@ static void fmParseStatus(const char * p)
       case 'T': fmStatus.temp1 = v; break;
       case 'U': fmStatus.temp2 = v; break;
       case 'X': fmStatus.simulated = v != 0; break;
+      case 'D': fmStatus.feederDir = v > 0 ? 1 : (v < 0 ? -1 : 0); break;
+      case 'E': fmStatus.feederRpm100 = v; break;
       default: break;
     }
 

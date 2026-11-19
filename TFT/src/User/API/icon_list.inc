@@ -148,4 +148,5 @@ X_ICON (MESH_EDITOR)
 X_ICON (BRIGHTNESS)
 X_ICON (MESH_VALID)
 X_ICON (DELTA_CALIBRATE)
+X_ICON (FEEDER)  // Turtle FilamentMaker force feeder
 // After changing/adding/removing an icon, change the ICON_FLASH_SIGN in Settings.h
