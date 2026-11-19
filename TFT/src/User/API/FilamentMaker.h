@@ -4,8 +4,9 @@
 // Turtle FilamentMaker support.
 //
 // The FilamentMaker controller (ESP32) emulates a minimal Marlin host and identifies itself with
-// "FIRMWARE_NAME:FilamentMaker" in its M115 answer. When detected, the TFT keeps working as for
-// Marlin (temperatures, fans, notifications, host prompts) and additionally:
+// "FIRMWARE_NAME:FilamentMaker" in its M115 answer. This firmware is FilamentMaker only: its screens
+// are shown from boot ("offline" / "waiting" until the controller answers), never the stock printer
+// screens. The TFT keeps working as for Marlin (temperatures, fans, notifications, host prompts) and:
 //   - asks for a periodic compact status line   FM_REPORT S1  ->  "FM:S.. V.. N.. ..."
 //   - shows the FilamentMaker screens instead of the stock status screen and main menu
 //   - edits the controller settings             FM_GET <group> / FM_SET <name> <value>
@@ -91,7 +92,7 @@ typedef struct
 extern FM_STATUS fmStatus;
 
 // --- detection / life cycle ---
-bool fmIsActive(void);                // FilamentMaker controller detected
+bool fmIsActive(void);                // FilamentMaker screens in use (always, see above)
 void fmDetected(void);                // called from the M115 parser
 void fmLoop(void);                    // background: keeps the status report alive
 

@@ -7,7 +7,7 @@
 
 FM_STATUS fmStatus = {0};
 
-static bool fmActive = false;
+static bool fmActive = true;  // this firmware is FilamentMaker only: its screens from boot, "offline" until the controller answers
 static uint32_t fmLastRequestMs = 0;
 
 static FM_PARAM fmParams[FM_MAX_PARAMS];
