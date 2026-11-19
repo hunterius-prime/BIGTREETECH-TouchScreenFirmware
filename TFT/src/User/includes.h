@@ -102,6 +102,8 @@
 #include "SpeedControl.h"
 #include "Temperature.h"
 #include "FilamentMaker.h"  // Turtle FilamentMaker
+#include "Cnc.h"            // Turtle CNC
+#include "CncDroFont.h"     // Turtle CNC
 #include "Touch_Encoder.h"
 #include "Touch_Screen.h"
 
@@ -117,6 +119,7 @@
 #include "Extrude.h"
 #include "Fan.h"
 #include "FmMenu.h"  // Turtle FilamentMaker
+#include "CncMenu.h" // Turtle CNC
 #include "FeatureSettings.h"
 #include "Heat.h"
 #include "Home.h"

@@ -182,13 +182,25 @@ static bool printPageItemSelected(uint16_t index)
       // load model preview in flash if icon exists
       setPrintModelIcon(infoFile.source < FS_ONBOARD_MEDIA && model_DecodeToFlash(infoFile.path));
 
-      char temp_info[FILE_NUM + 50];
+      #ifdef TURTLE_CNC
+        static char temp_info[FILE_NUM + 120];
 
-      sprintf(temp_info, (char *)textSelect(LABEL_START_PRINT), (uint8_t *)(filename));  // display short or long filename
+        cncStartCheckText(temp_info, sizeof(temp_info), filename);  // spindle, tool height, XY zero
 
-      // confirm file selection
-      popupDialog(DIALOG_TYPE_QUESTION, LABEL_PRINT, (uint8_t *)temp_info, LABEL_CONFIRM, LABEL_CANCEL,
-                  startPrinting, exitFolder, NULL);
+        _setDialogTitleStr((uint8_t *)"Start job");
+        _setDialogMsgStr((uint8_t *)temp_info);
+        _setDialogOkTextStr((uint8_t *)"Start");
+        _setDialogCancelTextLabel(LABEL_CANCEL);
+        showDialog(DIALOG_TYPE_QUESTION, startPrinting, exitFolder, NULL);
+      #else
+        char temp_info[FILE_NUM + 50];
+
+        sprintf(temp_info, (char *)textSelect(LABEL_START_PRINT), (uint8_t *)(filename));  // display short or long filename
+
+        // confirm file selection
+        popupDialog(DIALOG_TYPE_QUESTION, LABEL_PRINT, (uint8_t *)temp_info, LABEL_CONFIRM, LABEL_CANCEL,
+                    startPrinting, exitFolder, NULL);
+      #endif
 
       hasUpdate = false;
     }
@@ -397,7 +409,11 @@ void menuPrint(void)
       #endif
       {ICON_NULL,                    LABEL_NULL},
       {ICON_NULL,                    LABEL_NULL},
-      {ICON_SCREEN_INFO,             LABEL_PREVIOUS_PRINT_DATA},
+      #ifdef TURTLE_CNC
+        {ICON_NULL,                    LABEL_NULL},
+      #else
+        {ICON_SCREEN_INFO,             LABEL_PREVIOUS_PRINT_DATA},
+      #endif
       {ICON_NULL,                    LABEL_NULL},
       {ICON_NULL,                    LABEL_NULL},
       {ICON_BACK,                    LABEL_BACK},
@@ -406,7 +422,11 @@ void menuPrint(void)
 
   KEY_VALUES key_num = KEY_IDLE;
 
-  if (infoMachineSettings.onboardSD == ENABLED)
+  #ifdef TURTLE_CNC
+    if (false)  // Turtle CNC: jobs run from the TFT SD / USB only (the TFT streams them)
+  #else
+    if (infoMachineSettings.onboardSD == ENABLED)
+  #endif
   {
     sourceSelItems.items[PRINT_KEY_ONBOARD_SD].icon = ICON_ONBOARD_SD;
     sourceSelItems.items[PRINT_KEY_ONBOARD_SD].label.index = LABEL_ONBOARD_SD;

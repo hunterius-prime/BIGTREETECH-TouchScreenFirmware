@@ -149,4 +149,10 @@ X_ICON (BRIGHTNESS)
 X_ICON (MESH_VALID)
 X_ICON (DELTA_CALIBRATE)
 X_ICON (FEEDER)  // Turtle FilamentMaker force feeder
+X_ICON (ZERO_X)     // Turtle CNC: G92 X0
+X_ICON (ZERO_Y)     // Turtle CNC: G92 Y0
+X_ICON (ZERO_Z)     // Turtle CNC: G92 Z0
+X_ICON (GOTO_ZERO)  // Turtle CNC: G0 X0 Y0
+X_ICON (KNOB_X)     // Turtle CNC: knob jogs X
+X_ICON (KNOB_Y)     // Turtle CNC: knob jogs Y
 // After changing/adding/removing an icon, change the ICON_FLASH_SIGN in Settings.h

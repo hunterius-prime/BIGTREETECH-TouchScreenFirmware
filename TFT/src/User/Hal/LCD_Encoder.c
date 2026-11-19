@@ -81,14 +81,14 @@ void LCD_Enc_ResetClick(void)
   encoderClickBlocked = !GPIO_GetLevel(LCD_BTN_PIN);
 }
 
-bool LCD_Enc_ReadClick(void)
+uint8_t LCD_Enc_ReadPress(uint16_t longMs)
 {
   bool pressed = !GPIO_GetLevel(LCD_BTN_PIN);
 
   if (encoderClickBlocked)
   {
     encoderClickBlocked = pressed;
-    return false;
+    return ENC_PRESS_NONE;
   }
 
   if (pressed)
@@ -99,17 +99,25 @@ bool LCD_Enc_ReadClick(void)
       encoderClickStart = OS_GetTimeMs();
     }
 
-    return false;
+    return ENC_PRESS_NONE;
   }
 
   if (!encoderClickDown)
-    return false;
+    return ENC_PRESS_NONE;
 
   encoderClickDown = false;
 
   uint32_t held = OS_GetTimeMs() - encoderClickStart;
 
-  return held >= LCD_ENC_BUTTON_INTERVAL && held < MODE_SWITCHING_INTERVAL;
+  if (held < LCD_ENC_BUTTON_INTERVAL || held >= MODE_SWITCHING_INTERVAL)  // bounce, or the mode switching press
+    return ENC_PRESS_NONE;
+
+  return held < longMs ? ENC_PRESS_SHORT : ENC_PRESS_LONG;
+}
+
+bool LCD_Enc_ReadClick(void)
+{
+  return LCD_Enc_ReadPress(MODE_SWITCHING_INTERVAL) == ENC_PRESS_SHORT;
 }
 
 uint8_t LCD_Enc_ReadPos(void)

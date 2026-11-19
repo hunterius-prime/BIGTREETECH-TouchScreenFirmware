@@ -300,6 +300,11 @@ void menuStatus(void)
     return;
   }
 
+  #ifdef TURTLE_CNC  // Turtle CNC has its own status screen
+    REPLACE_MENU(menuCncStatus);
+    return;
+  #endif
+
   GUI_SetBkColor(infoSettings.bg_color);
   menuDrawPage(&statusItems);
   GUI_SetColor(GANTRY_XYZ_BG_COLOR);

@@ -22,6 +22,9 @@ extern "C" {
   bool LCD_Enc_ReadBtn(uint16_t duration);  // return the button press state. Duration is in milli seconds
   void LCD_Enc_ResetClick(void);            // forget a press in progress (a held button gives no click until released)
   bool LCD_Enc_ReadClick(void);             // true once per short press, on release (shorter than the mode switching long press)
+
+  enum { ENC_PRESS_NONE = 0, ENC_PRESS_SHORT, ENC_PRESS_LONG };
+  uint8_t LCD_Enc_ReadPress(uint16_t longMs);  // on release: ENC_PRESS_SHORT (< longMs), ENC_PRESS_LONG (up to the mode switching press)
   uint8_t LCD_Enc_ReadPos(void);            // return the position pins state
   void LCD_Enc_SendPulse(uint8_t num);      // send a pulse to the encoder
   bool LCD_Enc_CheckState(void);

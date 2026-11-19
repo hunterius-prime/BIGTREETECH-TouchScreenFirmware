@@ -322,6 +322,13 @@ static void preparePrintSummary(void)
 // send print codes [0: start gcode, 1: end gcode 2: cancel gcode]
 static void sendPrintCodes(uint8_t index)
 {
+  #ifdef TURTLE_CNC
+    // Turtle CNC: never send the printer start / end / cancel scripts (homing, heaters, motors off)
+    // with a tool in the work. The job file holds everything the mill needs.
+    (void)index;
+    return;
+  #endif
+
   PRINT_GCODES printcodes;
 
   W25Qxx_ReadBuffer((uint8_t *)&printcodes, PRINT_GCODES_ADDR, sizeof(PRINT_GCODES));
@@ -607,6 +614,13 @@ bool pausePrint(bool isPause, PAUSE_TYPE pauseType)
   if (loopDetected) return false;
   if (!infoPrinting.printing) return false;
   if (infoPrinting.paused == isPause) return false;
+
+  #ifdef TURTLE_CNC
+    // Turtle CNC: a pause only holds the file stream. The printer pause (Z raise, park X/Y) would drag
+    // the tool through the work.
+    if (pauseType == PAUSE_NORMAL)
+      pauseType = PAUSE_EXTERNAL;
+  #endif
 
   loopDetected = true;
 

@@ -60,6 +60,10 @@ void loopBackEnd(void)
   // Turtle FilamentMaker: keep the status report alive
   fmLoop();
 
+  #ifdef TURTLE_CNC
+    cncLoop();  // Turtle CNC: jog moves, feed override, connection changes
+  #endif
+
   // handle ACK message timeout
   if (InfoHost_HandleAckTimeout())  // if ACK message timeout, unlock any pending query waiting for an update
     resetPendingQueries();

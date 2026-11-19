@@ -182,7 +182,15 @@ static char * isSupportedFile(const char * filename)
 {
   char * extPos = strrchr(filename, '.');  // check last "." in the name where extension is supposed to start
 
-  return (extPos != NULL && (extPos[1] == 'g' || extPos[1] == 'G')) ? extPos : NULL;
+  if (extPos == NULL)
+    return NULL;
+
+  #ifdef TURTLE_CNC  // CNC programs: .nc, .ngc, .tap besides .gcode / .g / .gco
+    if (extPos[1] == 'n' || extPos[1] == 'N' || extPos[1] == 't' || extPos[1] == 'T')
+      return extPos;
+  #endif
+
+  return (extPos[1] == 'g' || extPos[1] == 'G') ? extPos : NULL;
 }
 
 // add a file name or folder name to file list

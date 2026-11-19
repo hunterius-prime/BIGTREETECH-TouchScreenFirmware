@@ -179,6 +179,10 @@ void powerFailedCreate(char * path)
 {
   powerFailedDelete();  // close and delete PLR file, if any, first
 
+  #ifdef TURTLE_CNC
+    return;  // Turtle CNC: no power-loss resume (a restarted job would cut from a wrong position)
+  #endif
+
   if (!infoSettings.plr) return;                    // if PLR is disabled
   if (infoFile.source >= FS_ONBOARD_MEDIA) return;  // onboard media not supported now
 

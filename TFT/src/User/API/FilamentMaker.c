@@ -7,7 +7,11 @@
 
 FM_STATUS fmStatus = {0};
 
-static bool fmActive = true;  // this firmware is FilamentMaker only: its screens from boot, "offline" until the controller answers
+#ifdef TURTLE_FM
+  static bool fmActive = true;  // this firmware is FilamentMaker only: its screens from boot, "offline" until the controller answers
+#else
+  static bool fmActive = false;  // other builds (e.g. Turtle CNC): only when a FilamentMaker controller answers M115
+#endif
 static uint32_t fmLastRequestMs = 0;
 
 static FM_PARAM fmParams[FM_MAX_PARAMS];

@@ -638,6 +638,10 @@ void parseAck(void)
     // parse and store M114, current position
     else if (ack_starts_with("X:") || ack_seen("C: X:"))  // Smoothieware axis position starts with "C: X:"
     {
+      #ifdef TURTLE_CNC
+        cncParsePosition(ack_cache);  // work and machine (step count) position for the readout
+      #endif
+
       coordinateSetAxisActual(X_AXIS, ack_value());
 
       if (ack_continue_seen("Y:"))
