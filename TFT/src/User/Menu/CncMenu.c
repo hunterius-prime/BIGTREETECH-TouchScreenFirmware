@@ -15,7 +15,7 @@
 #define CNC_COLOR_SEP    0x2965  // #2e2e2e
 #define CNC_COLOR_VALUE  WHITE
 
-#define CNC_LONG_PRESS_MS 600   // knob: shorter = click, longer (up to the 1.5 s mode switch) = long press
+#define CNC_LONG_PRESS_MS KNOB_LONG_PRESS_MS  // knob: shorter = click, longer (up to the 1.5 s mode switch) = long press
 #define CNC_QUERY_MS      250   // position query while idle
 #define CNC_QUERY_JOB_MS  1000  // position query during a job
 
@@ -315,49 +315,6 @@ static void knobReset(void)
     encoderPosition = 0;
     LCD_Enc_ResetClick();
   #endif
-}
-
-// focus frame for icon menus: turn moves it, click runs the focused icon (returned as its key)
-static void navFrame(int8_t index, bool on)
-{
-  if (index < 0)
-    return;
-
-  const GUI_RECT * r = &rect_of_key[index];
-
-  GUI_SetColor(on ? CNC_COLOR_FOCUS : infoSettings.bg_color);
-  GUI_DrawRect(r->x0, r->y0, r->x1 - 1, r->y1 - 1);
-  GUI_DrawRect(r->x0 + 1, r->y0 + 1, r->x1 - 2, r->y1 - 2);
-  GUI_RestoreColorDefault();
-}
-
-static KEY_VALUES navHandle(const MENUITEMS * items, int8_t * focus, int16_t detents, KNOB_PRESS press)
-{
-  if (detents != 0)
-  {
-    int8_t f = *focus;
-    int8_t dir = detents > 0 ? 1 : -1;
-
-    if (f < 0)  // first turn: show the frame on the first icon in that direction
-      f = dir > 0 ? -1 : ITEM_PER_PAGE;
-
-    for (uint8_t n = 0; n < ITEM_PER_PAGE; n++)
-    {
-      f = (f + dir + ITEM_PER_PAGE) % ITEM_PER_PAGE;
-
-      if (items->items[f].icon != ICON_NULL)
-        break;
-    }
-
-    navFrame(*focus, false);
-    *focus = f;
-    navFrame(*focus, true);
-  }
-
-  if (press == KNOB_CLICK && *focus >= 0)
-    return (KEY_VALUES)*focus;
-
-  return KEY_IDLE;
 }
 
 // ============================================================================ dialogs
@@ -708,7 +665,6 @@ void menuCncZero(void)
   };
 
   KEY_VALUES key_num;
-  int8_t focus = -1;
 
   if (lockedInJob())
   {
@@ -718,20 +674,13 @@ void menuCncZero(void)
 
   menuDrawPage(&items);
   stripUpdate(true);
-  knobReset();
 
   while (MENU_IS(menuCncZero))
   {
-    KNOB_PRESS press;
-    int16_t detents = knobRead(&press);
-
     cncQueryPosition(CNC_QUERY_MS);
     stripUpdate(false);
 
-    key_num = navHandle(&items, &focus, detents, press);
-
-    if (key_num == KEY_IDLE)
-      key_num = menuKeyGetValue();
+    key_num = menuKeyGetValue();  // knob: focus frame + click (menu.c)
 
     switch (key_num)
     {
@@ -777,20 +726,12 @@ void menuCncMenu(void)
   };
 
   KEY_VALUES key_num;
-  int8_t focus = -1;
 
   menuDrawPage(&items);
-  knobReset();
 
   while (MENU_IS(menuCncMenu))
   {
-    KNOB_PRESS press;
-    int16_t detents = knobRead(&press);
-
-    key_num = navHandle(&items, &focus, detents, press);
-
-    if (key_num == KEY_IDLE)
-      key_num = menuKeyGetValue();
+    key_num = menuKeyGetValue();  // knob: focus frame + click (menu.c)
 
     switch (key_num)
     {
