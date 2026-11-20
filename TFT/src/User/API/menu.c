@@ -554,6 +554,130 @@ static const void (* curMenuRedrawHandle)(void) = NULL;  // current custom menu
 static MENU_TYPE menuType = MENU_TYPE_ICON;              // current menu layout type
 static uint16_t curRectCount = 0;                        // current menu layout rect count
 
+#ifdef KNOB_NAV
+
+// Knob navigation on icon pages: turning moves a focus frame over the icons (empty slots are skipped), a short
+// click returns the focused icon's key as a touch would. Each menu depth remembers the focus of its menu, so going
+// back lands on the item that was opened. List pages: ListManager.c; dialogs: Popup.c.
+static bool knobPage = false;                             // current icon page was drawn by menuDrawPage()
+static int8_t knobFocus = -1;                             // focused icon, -1 = none
+static void (* knobItemRedraw)(uint8_t position) = NULL;  // custom icon redraw (live tiles), NULL = icon only
+static FP_MENU knobMenu[MAX_MENU_DEPTH];                  // menu that owns knobSaved[] at each depth
+static int16_t knobSaved[MAX_MENU_DEPTH];                 // its focus (icon position or list item)
+
+int16_t menuKnobRestore(void)
+{
+  uint8_t depth = infoMenu.cur;
+
+  if (depth >= MAX_MENU_DEPTH || knobMenu[depth] != infoMenu.menu[depth])
+    return -1;
+
+  return knobSaved[depth];
+}
+
+void menuKnobRemember(int16_t focus)
+{
+  uint8_t depth = infoMenu.cur;
+
+  if (depth >= MAX_MENU_DEPTH)
+    return;
+
+  knobMenu[depth] = infoMenu.menu[depth];
+  knobSaved[depth] = focus;
+}
+
+static void knobFrame(const GUI_RECT * rect)
+{
+  GUI_SetColor(KNOB_NAV_COLOR);
+  GUI_DrawRect(rect->x0, rect->y0, rect->x1 - 1, rect->y1 - 1);
+  GUI_DrawRect(rect->x0 + 1, rect->y0 + 1, rect->x1 - 2, rect->y1 - 2);
+  GUI_RestoreColorDefault();
+}
+
+void menuKnobListFrame(uint8_t position)
+{
+  knobFrame(rect_of_keyListView + position);
+}
+
+void menuSetKnobItemRedraw(void (* redraw)(uint8_t position))
+{
+  knobItemRedraw = redraw;
+}
+
+void menuKnobRedraw(void)
+{
+  if (knobPage && menuType == MENU_TYPE_ICON && knobFocus >= 0)
+    knobFrame(curRect + knobFocus);
+}
+
+static void knobUnfocus(void)
+{
+  int8_t position = knobFocus;
+
+  if (position < 0)
+    return;
+
+  knobFocus = -1;  // the icon is drawn again without the frame
+
+  if (knobItemRedraw != NULL)
+    knobItemRedraw(position);
+  else
+    menuDrawIconOnly(&curMenuItems->items[position], position);
+}
+
+static KEY_VALUES menuKnobIcons(void)
+{
+  int16_t detents = encoderPosition;
+  uint8_t press = LCD_Enc_ReadPress(KNOB_LONG_PRESS_MS);
+
+  encoderPosition = 0;
+
+  if (!knobPage || curMenuItems == NULL)
+    return KEY_IDLE;
+
+  if (detents != 0)
+  {
+    int8_t dir = detents > 0 ? 1 : -1;
+    int8_t f = knobFocus;
+    int16_t steps = ABS(detents);
+
+    if (f < 0)  // first turn: the first icon in that direction
+    {
+      f = dir > 0 ? -1 : ITEM_PER_PAGE;
+      steps = 1;
+    }
+
+    if (steps > ITEM_PER_PAGE)
+      steps = ITEM_PER_PAGE;
+
+    while (steps-- > 0)
+    {
+      for (uint8_t n = 0; n < ITEM_PER_PAGE; n++)
+      {
+        f = (f + dir + ITEM_PER_PAGE) % ITEM_PER_PAGE;
+
+        if (curMenuItems->items[f].icon != ICON_NULL)
+          break;
+      }
+    }
+
+    if (f >= 0 && f < ITEM_PER_PAGE && f != knobFocus && curMenuItems->items[f].icon != ICON_NULL)
+    {
+      knobUnfocus();
+      knobFocus = f;
+      knobFrame(curRect + f);
+      menuKnobRemember(f);
+    }
+  }
+
+  if (press == ENC_PRESS_SHORT && knobFocus >= 0 && curMenuItems->items[knobFocus].icon != ICON_NULL)
+    return (KEY_VALUES)knobFocus;
+
+  return KEY_IDLE;
+}
+
+#endif  // KNOB_NAV
+
 static struct
 {
   GUI_RECT rect;
@@ -737,6 +861,11 @@ void menuDrawIconOnly(const ITEM * item, uint8_t position)
     ICON_ReadDisplay(rect->x0, rect->y0, item->icon);
   else
     GUI_ClearPrect(rect);
+
+  #ifdef KNOB_NAV
+    if (knobPage && menuType == MENU_TYPE_ICON && position == knobFocus)
+      knobFrame(rect);
+  #endif
 }
 
 void menuDrawIconText(const ITEM * item, uint8_t position)
@@ -790,6 +919,11 @@ void setMenu(MENU_TYPE menu_type, LABEL * title, uint16_t rectCount, const GUI_R
   curTitle = title;
   curMenuRedrawHandle = menu_redraw;
   TS_ReDrawIcon = action_redraw;
+
+  #ifdef KNOB_NAV
+    knobPage = false;  // custom layout: no icon navigation
+    knobFocus = -1;
+  #endif
 
   #if LCD_ENCODER_SUPPORT
     encoderPosition = 0;
@@ -945,6 +1079,15 @@ void menuDrawPage(const MENUITEMS * menuItems)
     curRect = (MENU_IS(menuStatus)) ? rect_of_keySS : rect_of_key;
   #endif
 
+  #ifdef KNOB_NAV
+    knobPage = true;
+    knobItemRedraw = NULL;
+    knobFocus = menuKnobRestore();  // back from a submenu: the item that opened it
+
+    if (knobFocus >= ITEM_PER_PAGE || (knobFocus >= 0 && curMenuItems->items[knobFocus].icon == ICON_NULL))
+      knobFocus = -1;
+  #endif
+
   menuClearGaps();  // use this function instead of GUI_Clear to eliminate the splash screen when clearing the screen.
   menuSetTitle(&curMenuItems->title);
 
@@ -969,6 +1112,11 @@ void menuDrawListPage(const LISTITEMS * listItems)
   curListItems = listItems;
   curMenuRedrawHandle = NULL;
   TS_ReDrawIcon = itemDrawIconPress;
+
+  #ifdef KNOB_NAV
+    knobPage = false;  // list rows: ListManager.c
+    knobFocus = -1;
+  #endif
 
   GUI_SetBkColor(infoSettings.title_bg_color);
   GUI_ClearRect(0, 0, LCD_WIDTH, TITLE_END_Y);
@@ -1166,7 +1314,14 @@ KEY_VALUES menuKeyGetValue(void)
 
   #if LCD_ENCODER_SUPPORT
     if (tempkey == KEY_IDLE)
-      tempkey = LCD_Enc_KeyValue();
+    {
+      #ifdef KNOB_NAV
+        if (menuType == MENU_TYPE_ICON)
+          tempkey = menuKnobIcons();
+        else
+      #endif
+          tempkey = LCD_Enc_KeyValue();
+    }
   #endif
 
   return tempkey;

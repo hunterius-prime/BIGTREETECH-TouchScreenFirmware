@@ -10,6 +10,15 @@ extern "C" {
 #include "variants.h"  // for ENC_ACTIVE_SIGNAL, LCD_ENCODER_SUPPORT etc.
 #include "menu.h"
 
+// Turtle builds: knob navigation. Turning moves a focus frame over the icons of a menu, the rows of a list
+// or the buttons of a dialog; a short click runs the focused one like a touch (menu.c, ListManager.c, Popup.c).
+// Screens that use the knob themselves (value editors, jog) read it first, so the navigation gets nothing there.
+#if LCD_ENCODER_SUPPORT && (defined(TURTLE_FM) || defined(TURTLE_CNC))
+  #define KNOB_NAV
+  #define KNOB_NAV_COLOR     0xFEA0  // focus frame (#ffd400)
+  #define KNOB_LONG_PRESS_MS 600     // a shorter press is a click; a longer one (up to the mode switching) is not
+#endif
+
 #if ENC_ACTIVE_SIGNAL
   void LCD_Enc_InitActiveSignal(void);
   void LCD_Enc_SetActiveSignal(uint8_t status);

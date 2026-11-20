@@ -334,6 +334,17 @@ static void fmDrawStrip(void)
   GUI_RestoreColorDefault();
 }
 
+#ifdef KNOB_NAV
+// the knob focus left an icon: the four live tiles are drawn again as a whole (icon + values)
+static void fmKnobRedrawItem(uint8_t position)
+{
+  if (position < 4)
+    fmDrawTiles(true);
+  else
+    menuDrawIconOnly(&getCurMenuItems()->items[position], position);
+}
+#endif
+
 void menuFmStatus(void)
 {
   if (!fmIsActive())
@@ -381,6 +392,11 @@ void menuFmStatus(void)
   menuDrawPage(&fmStatusItems);
   fmDrawTiles(true);
   fmDrawStrip();
+
+  #ifdef KNOB_NAV
+    menuSetKnobItemRedraw(fmKnobRedrawItem);
+    menuKnobRedraw();  // the tiles were drawn over a remembered focus frame
+  #endif
 
   while (MENU_IS(menuFmStatus))
   {
@@ -431,6 +447,10 @@ void menuFmStatus(void)
 
       fmDrawTiles(false);
       fmDrawStrip();
+
+      #ifdef KNOB_NAV
+        menuKnobRedraw();  // a tile drawn again covers the frame
+      #endif
     }
 
     key_num = menuKeyGetValue();

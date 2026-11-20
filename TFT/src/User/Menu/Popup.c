@@ -116,6 +116,53 @@ static void windowReDrawButton(uint8_t position, uint8_t pressed)
   GUI_DrawButton(windowButton + position, pressed);
 }
 
+#ifdef KNOB_NAV
+
+// Knob (see LCD_Encoder.h): the focused button is drawn pressed. A question starts on Cancel, so a click alone never
+// confirms; turn left for OK, right for Cancel. A short click presses the focused button.
+static int8_t knobButton = -1;
+
+static void dialogKnobFocus(int8_t index)
+{
+  if (index == knobButton)
+    return;
+
+  if (knobButton >= 0)
+    windowReDrawButton(knobButton, 0);
+
+  knobButton = index;
+
+  if (knobButton >= 0)
+    windowReDrawButton(knobButton, 1);
+}
+
+static void dialogKnobStart(void)
+{
+  knobButton = -1;
+  dialogKnobFocus(buttonNum - 1);  // Cancel, or the only button
+
+  encoderPosition = 0;
+  LCD_Enc_ResetClick();  // a press still held from the screen below does not answer
+}
+
+static uint16_t dialogKnobKey(void)
+{
+  int16_t detents = encoderPosition;
+  uint8_t press = LCD_Enc_ReadPress(KNOB_LONG_PRESS_MS);
+
+  encoderPosition = 0;
+
+  if (detents != 0 && buttonNum > 1)
+    dialogKnobFocus(detents > 0 ? buttonNum - 1 : 0);
+
+  if (press == ENC_PRESS_SHORT && knobButton >= 0)
+    return knobButton;
+
+  return IDLE_TOUCH;
+}
+
+#endif  // KNOB_NAV
+
 void popupDrawPage(DIALOG_TYPE type, BUTTON * btn, const uint8_t * title, const uint8_t * context, const uint8_t * yes,
                    const uint8_t * no)
 {
@@ -158,6 +205,11 @@ void menuDialog(void)
   while (MENU_IS(menuDialog))
   {
     uint16_t key_num = KEY_GetValue(buttonNum, cur_btn_rect);
+
+    #ifdef KNOB_NAV
+      if (key_num == IDLE_TOUCH)
+        key_num = dialogKnobKey();
+    #endif
 
     switch (key_num)
     {
@@ -237,6 +289,10 @@ void loopPopup(void)
 
     return;
   }
+
+  #ifdef KNOB_NAV
+    dialogKnobStart();
+  #endif
 
   // avoid to nest menuDialog popup type (while a menuNotification popup type can be overridden)
   if (MENU_IS_NOT(menuDialog))
