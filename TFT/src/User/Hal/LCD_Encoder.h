@@ -10,6 +10,15 @@ extern "C" {
 #include "variants.h"  // for ENC_ACTIVE_SIGNAL, LCD_ENCODER_SUPPORT etc.
 #include "menu.h"
 
+// Turtle builds: knob navigation. Turning moves a focus frame over the icons of a menu, the rows of a list
+// or the buttons of a dialog; a short click runs the focused one like a touch (menu.c, ListManager.c, Popup.c).
+// Screens that use the knob themselves (value editors, jog) read it first, so the navigation gets nothing there.
+#if LCD_ENCODER_SUPPORT && (defined(TURTLE_FM) || defined(TURTLE_CNC))
+  #define KNOB_NAV
+  #define KNOB_NAV_COLOR     0xFEA0  // focus frame (#ffd400)
+  #define KNOB_LONG_PRESS_MS 600     // a shorter press is a click; a longer one (up to the mode switching) is not
+#endif
+
 #if ENC_ACTIVE_SIGNAL
   void LCD_Enc_InitActiveSignal(void);
   void LCD_Enc_SetActiveSignal(uint8_t status);
@@ -22,6 +31,9 @@ extern "C" {
   bool LCD_Enc_ReadBtn(uint16_t duration);  // return the button press state. Duration is in milli seconds
   void LCD_Enc_ResetClick(void);            // forget a press in progress (a held button gives no click until released)
   bool LCD_Enc_ReadClick(void);             // true once per short press, on release (shorter than the mode switching long press)
+
+  enum { ENC_PRESS_NONE = 0, ENC_PRESS_SHORT, ENC_PRESS_LONG };
+  uint8_t LCD_Enc_ReadPress(uint16_t longMs);  // on release: ENC_PRESS_SHORT (< longMs), ENC_PRESS_LONG (up to the mode switching press)
   uint8_t LCD_Enc_ReadPos(void);            // return the position pins state
   void LCD_Enc_SendPulse(uint8_t num);      // send a pulse to the encoder
   bool LCD_Enc_CheckState(void);

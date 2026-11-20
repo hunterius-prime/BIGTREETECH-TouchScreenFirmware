@@ -17,6 +17,91 @@ static bool handleBack = true;
 static void (* action_preparePage)(LISTITEMS * listItems, uint8_t index) = NULL;
 static void (* action_prepareItem)(LISTITEM * item, uint16_t index, uint8_t itemPos) = NULL;
 
+#ifdef KNOB_NAV
+
+// Knob navigation (see LCD_Encoder.h): turning moves a focus frame over the rows, across pages, and after the last
+// row onto Back; a short click selects the focused row like a touch.
+static int16_t knobRow = -1;  // focused item (0 .. maxItemCount - 1), maxItemCount = Back, -1 = none
+
+static void listViewSetCurPage(uint8_t curPage);
+
+static int8_t knobRowPosition(int16_t row)  // position on the shown page, -1 = not shown
+{
+  if (row < 0)
+    return -1;
+
+  if (row >= maxItemCount)
+    return KEY_INDEX_BACK;
+
+  return (row / LISTITEM_PER_PAGE == curPageIndex) ? row % LISTITEM_PER_PAGE : -1;
+}
+
+static void knobRowShow(void)
+{
+  int8_t position = knobRowPosition(knobRow);
+
+  if (position >= 0)
+    menuKnobListFrame(position);
+}
+
+static void knobRowSet(int16_t row)
+{
+  int8_t old = knobRowPosition(knobRow);
+
+  knobRow = row;
+  menuKnobRemember(row);
+
+  if (row < maxItemCount && row / LISTITEM_PER_PAGE != curPageIndex)  // row on another page: show that page
+  {
+    curPageIndex = row / LISTITEM_PER_PAGE;
+
+    if (curPageIndexSource != NULL)
+      *curPageIndexSource = curPageIndex;
+
+    listViewSetCurPage(curPageIndex);
+    menuRefreshListPage();
+  }
+  else if (old >= 0)
+  {
+    menuDrawListItem(&listItems.items[old], old);
+  }
+
+  knobRowShow();
+}
+
+static KEY_VALUES knobRowKey(void)
+{
+  int16_t detents = encoderPosition;
+  uint8_t press = LCD_Enc_ReadPress(KNOB_LONG_PRESS_MS);
+
+  encoderPosition = 0;
+
+  if (detents != 0)
+  {
+    int16_t row;
+
+    if (knobRow < 0)  // first turn: the first row of the shown page
+      row = MIN(curPageIndex * LISTITEM_PER_PAGE, maxItemCount);
+    else
+      row = NOBEYOND(0, knobRow + detents, maxItemCount);
+
+    if (row != knobRow)
+      knobRowSet(row);
+  }
+
+  if (press == ENC_PRESS_SHORT)
+  {
+    int8_t position = knobRowPosition(knobRow);
+
+    if (position >= 0)
+      return (KEY_VALUES)position;
+  }
+
+  return KEY_IDLE;
+}
+
+#endif  // KNOB_NAV
+
 // display page at selected index
 static void listViewSetCurPage(uint8_t curPage)
 {
@@ -72,6 +157,15 @@ void listViewCreate(LABEL title, LISTITEM * items, uint16_t maxItems, uint16_t *
 
   listViewSetCurPage(curPageIndex);
   menuDrawListPage(&listItems);
+
+  #ifdef KNOB_NAV
+    knobRow = menuKnobRestore();  // back from a submenu: the row that opened it
+
+    if (knobRow > maxItemCount || knobRowPosition(knobRow) < 0)
+      knobRow = -1;
+
+    knobRowShow();
+  #endif
 }
 
 void listViewSetTitle(LABEL title)
@@ -94,6 +188,14 @@ static inline bool listViewNextPage(void)
 
   listViewSetCurPage(curPageIndex);
   menuRefreshListPage();
+
+  #ifdef KNOB_NAV
+    if (knobRow >= 0 && knobRow < maxItemCount)  // the knob focus follows to the new page
+      knobRowSet(curPageIndex * LISTITEM_PER_PAGE);
+    else
+      knobRowShow();
+  #endif
+
   return true;
 }
 
@@ -111,17 +213,33 @@ static inline bool listViewPreviousPage(void)
 
   listViewSetCurPage(curPageIndex);
   menuRefreshListPage();
+
+  #ifdef KNOB_NAV
+    if (knobRow >= 0 && knobRow < maxItemCount)  // the knob focus follows to the new page
+      knobRowSet(curPageIndex * LISTITEM_PER_PAGE);
+    else
+      knobRowShow();
+  #endif
+
   return true;
 }
 
 void listViewRefreshPage(void)
 {
   menuRefreshListPage();
+
+  #ifdef KNOB_NAV
+    knobRowShow();
+  #endif
 }
 
 void listViewRefreshMenu(void)
 {
   menuDrawListPage(&listItems);
+
+  #ifdef KNOB_NAV
+    knobRowShow();
+  #endif
 }
 
 void listViewRefreshItem(uint16_t item)
@@ -147,6 +265,11 @@ void listViewRefreshItem(uint16_t item)
   }
 
   menuDrawListItem(&listItems.items[cur_i], cur_i);
+
+  #ifdef KNOB_NAV
+    if (knobRowPosition(knobRow) == cur_i)
+      menuKnobListFrame(cur_i);
+  #endif
 }
 
 uint8_t listViewGetCurPage(void)
@@ -156,7 +279,14 @@ uint8_t listViewGetCurPage(void)
 
 uint16_t listViewGetSelectedIndex(void)
 {
-  KEY_VALUES key_num = menuKeyGetValue();
+  KEY_VALUES key_num = KEY_IDLE;
+
+  #ifdef KNOB_NAV
+    key_num = knobRowKey();
+  #endif
+
+  if (key_num == KEY_IDLE)
+    key_num = menuKeyGetValue();
 
   if (key_num < LISTITEM_PER_PAGE)
   {
@@ -165,7 +295,8 @@ uint16_t listViewGetSelectedIndex(void)
 
     if (cur_index < maxItemCount)
     {
-      if (totalItems[cur_index].icon != CHARICON_NULL)
+      // the shown row (totalItems is NULL for lists built by prepareItem_action)
+      if (listItems.items[key_num].icon != CHARICON_NULL)
         return cur_index;
       else
         return KEY_IDLE;

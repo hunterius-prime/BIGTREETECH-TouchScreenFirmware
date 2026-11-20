@@ -198,6 +198,13 @@ void showLiveInfo(uint8_t index, const LIVE_INFO * liveicon, bool redrawIcon);
 void displayExhibitHeader(const char * titleStr, const char * unitStr);
 void displayExhibitValue(const char * valueStr);
 
+// Turtle knob navigation (KNOB_NAV, see LCD_Encoder.h)
+int16_t menuKnobRestore(void);                                  // focus remembered for the current menu, -1 = none
+void menuKnobRemember(int16_t focus);                           // icon position or list item of the current menu
+void menuKnobListFrame(uint8_t position);                       // focus frame on a list row or list button
+void menuSetKnobItemRedraw(void (* redraw)(uint8_t position));  // icons with live content: how to redraw one
+void menuKnobRedraw(void);                                      // draw the focus frame again after drawing over the icons
+
 KEY_VALUES menuKeyGetValue(void);
 
 // smart home
