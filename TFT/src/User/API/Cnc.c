@@ -99,7 +99,7 @@ bool cncIdle(void)
 
 void cncJog(uint8_t axis, float distance)
 {
-  if (axis >= CNC_AXES || !infoHost.connected || isPrinting())
+  if (axis >= CNC_AXES || !infoHost.connected || isPrinting() || cncFmState() != CNC_FM_IDLE)
     return;
 
   jogPending[axis] += distance;
@@ -226,6 +226,188 @@ static void cncFeedLoop(void)
     feedSent = feedShown;
 }
 
+// ---------------------------------------------------------------- feed move
+
+static struct
+{
+  CNC_FM_STATE state;
+  uint8_t      axis;
+  float        target;     // work coordinates
+  float        from;       // start of the move or of the resume
+  float        sent;       // end of the last segment sent
+  uint16_t     feed;       // mm/min of the next segment
+  uint32_t     busyUntil;  // estimated time Marlin finishes the segments sent
+  bool         endSent;    // M400 after the last segment is queued
+  bool         stopSent;   // M410 is queued
+  uint32_t     pausedMs;   // time the stop finished
+  bool         done;       // the move reached its target (cncFmTakeDone)
+} fm = {.feed = 50};
+
+static float cncFmSegment(uint16_t feed)
+{
+  float seg = feed / 60.0f * CNC_FM_SEG_MS / 1000.0f;
+
+  return seg > CNC_FM_SEG_MIN_MM ? seg : CNC_FM_SEG_MIN_MM;
+}
+
+static void cncFmBegin(void)
+{
+  fm.from = fm.sent = cncState.work[fm.axis];
+  fm.busyUntil = OS_GetTimeMs();
+  fm.endSent = false;
+  fm.stopSent = false;
+  fm.state = CNC_FM_MOVING;
+
+  if (feedShown != 100 || feedSent != 100)  // the feed on the screen is the real one: no override left from a job
+  {
+    mustStoreCmd("M220 S100\n");
+    feedShown = feedSent = 100;
+  }
+
+  mustStoreCmd("G90\n");
+}
+
+bool cncFmStart(uint8_t axis, float target, uint16_t feed)
+{
+  if (axis >= Z_AXIS || fm.state != CNC_FM_IDLE || !infoHost.connected || isPrinting() || cncJogPending())
+    return false;
+
+  fm.axis = axis;
+  fm.target = target;
+  fm.done = false;
+  cncFmSetFeed(feed);
+  cncFmBegin();
+  return true;
+}
+
+void cncFmStop(void)
+{
+  if (fm.state == CNC_FM_MOVING)
+    fm.state = CNC_FM_STOPPING;
+}
+
+bool cncFmResume(void)
+{
+  if (fm.state != CNC_FM_PAUSED || OS_GetTimeMs() - fm.pausedMs < CNC_FM_RESUME_MS || !infoHost.connected)
+    return false;
+
+  cncFmBegin();
+  return true;
+}
+
+void cncFmCancel(void)
+{
+  if (fm.state == CNC_FM_PAUSED)
+    fm.state = CNC_FM_IDLE;
+}
+
+void cncFmSetFeed(uint16_t feed)
+{
+  if (feed < CNC_FM_FEED_MIN) feed = CNC_FM_FEED_MIN;
+  if (feed > CNC_FM_FEED_MAX) feed = CNC_FM_FEED_MAX;
+
+  fm.feed = feed;
+}
+
+CNC_FM_STATE cncFmState(void) { return fm.state; }
+uint8_t cncFmAxis(void)       { return fm.axis; }
+float cncFmTarget(void)       { return fm.target; }
+float cncFmFrom(void)         { return fm.from; }
+uint16_t cncFmFeed(void)      { return fm.feed; }
+uint32_t cncFmPausedMs(void)  { return OS_GetTimeMs() - fm.pausedMs; }
+
+bool cncFmTakeDone(void)
+{
+  bool done = fm.done;
+
+  fm.done = false;
+  return done;
+}
+
+static void cncFmLoop(void)
+{
+  uint32_t now = OS_GetTimeMs();
+
+  switch (fm.state)
+  {
+    case CNC_FM_MOVING:
+      if (!cncIdle())  // the segment before is not taken yet (its "ok" comes once Marlin has planned it)
+        return;
+
+      if (fm.endSent)  // M400 answered: the table is at the target
+      {
+        fm.state = CNC_FM_IDLE;
+        fm.done = true;
+        lastQueryMs = 0;
+        return;
+      }
+
+      if (fm.sent == fm.target)  // all segments sent: M400 once Marlin should be done, so Stop never waits for it long
+      {
+        if ((int32_t)(fm.busyUntil - now) <= 0)
+        {
+          mustStoreCmd("M400\n");
+          fm.endSent = true;
+        }
+
+        return;
+      }
+
+      if ((int32_t)(fm.busyUntil - now) < CNC_FM_AHEAD_MS)
+      {
+        float seg = cncFmSegment(fm.feed);
+        float left = fm.target - fm.sent;
+        float next = fm.target;
+        float len;
+
+        // the last segment takes the rest when less than 1.5 segments are left (no short tail)
+        if (left > 1.5f * seg)
+          next = fm.sent + seg;
+        else if (left < -1.5f * seg)
+          next = fm.sent - seg;
+
+        len = next > fm.sent ? next - fm.sent : fm.sent - next;
+        mustStoreCmd("G1 %c%.3f F%d\n", cncAxisId[fm.axis], next, fm.feed);
+        fm.sent = next;
+
+        // its time at the feed and the M220 override Marlin applies to it
+        if ((int32_t)(fm.busyUntil - now) < 0)
+          fm.busyUntil = now;
+
+        fm.busyUntil += (uint32_t)(len / fm.feed * 60000.0f * 100.0f / (feedSent ? feedSent : 100));
+      }
+      break;
+
+    case CNC_FM_STOPPING:
+      if (!cncIdle())  // a segment (or M114 / M154) waiting for its "ok": takes milliseconds
+        return;
+
+      if (!fm.stopSent)
+      {
+        if (fm.endSent)  // only M400 was left: the move has just finished
+        {
+          fm.state = CNC_FM_IDLE;
+          fm.done = true;
+          lastQueryMs = 0;
+          return;
+        }
+
+        mustStoreCmd("M410\n");  // emergency parser: Marlin stops on receiving it
+        mustStoreCmd("M400\n");
+        mustStoreCmd("M114\n");  // stop position (after M410 Marlin's position is where the steppers stopped)
+        fm.stopSent = true;
+        return;
+      }
+
+      fm.state = CNC_FM_PAUSED;
+      fm.pausedMs = now;
+      break;
+
+    default:
+      break;
+  }
+}
+
 // ---------------------------------------------------------------- background
 
 void cncLoop(void)
@@ -243,11 +425,14 @@ void cncLoop(void)
     cncJogCancel();
     jogRunning = false;
     feedShown = feedSent = 100;
+    fm.state = CNC_FM_IDLE;  // Marlin restarted: whatever was planned is gone
+    fm.done = false;
   }
 
   if (!infoHost.connected)
     return;
 
+  cncFmLoop();
   cncJogLoop();
   cncFeedLoop();
 }

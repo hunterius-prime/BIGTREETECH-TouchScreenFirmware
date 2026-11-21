@@ -155,4 +155,14 @@ X_ICON (ZERO_Z)     // Turtle CNC: G92 Z0
 X_ICON (GOTO_ZERO)  // Turtle CNC: G0 X0 Y0
 X_ICON (KNOB_X)     // Turtle CNC: knob jogs X
 X_ICON (KNOB_Y)     // Turtle CNC: knob jogs Y
+X_ICON (FEED_MOVE)  // Turtle CNC: Feed move screen
+X_ICON (FM_AX_X)    // Turtle CNC: Feed move axis X
+X_ICON (FM_AX_Y)    // Turtle CNC: Feed move axis Y
+X_ICON (FM_ABS)     // Turtle CNC: Feed move go to a position
+X_ICON (FM_REL)     // Turtle CNC: Feed move move by a distance
+X_ICON (FM_FEED)    // Turtle CNC: Feed move feed
+X_ICON (FM_SEND)    // Turtle CNC: Feed move Send
+X_ICON (FM_P20)     // Turtle CNC: feed preset 20 mm/min
+X_ICON (FM_P50)     // Turtle CNC: feed preset 50 mm/min
+X_ICON (FM_P100)    // Turtle CNC: feed preset 100 mm/min
 // After changing/adding/removing an icon, change the ICON_FLASH_SIGN in Settings.h

@@ -12,6 +12,8 @@ void menuCncJog(void);     // jog by touch, knob = handwheel
 void menuCncZero(void);    // work zero, go to zero, home X / Y
 void menuCncMenu(void);    // main menu
 void menuCncFeed(void);    // feed override
+void menuCncFeedMove(void);  // one axis to a target at a cutting feed (Menu: "go to" starts at the current position)
+void menuCncFmFeed(void);    // its feed (mm/min): value, presets
 
 #ifdef __cplusplus
 }

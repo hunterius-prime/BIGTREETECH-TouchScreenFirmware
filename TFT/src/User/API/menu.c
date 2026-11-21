@@ -1272,6 +1272,10 @@ KEY_VALUES menuKeyGetValue(void)
                  (MENU_IS(menuMBL)) ||
                  (MENU_IS(menuBabystep)) ||
                  (MENU_IS(menuMeshEditor)) ||
+                 #ifdef TURTLE_CNC
+                   (MENU_IS(menuCncFeedMove)) ||  // Turtle CNC: tap on the value = keypad
+                   (MENU_IS(menuCncFmFeed)) ||
+                 #endif
                  (MENU_IS(menuFmEditParam)) ||  // Turtle FilamentMaker
                  (MENU_IS(menuFmFeeder)))
         {

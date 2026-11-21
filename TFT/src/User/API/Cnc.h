@@ -14,6 +14,18 @@
 // Jog: moves are sent as "G91 / G1 <axis><d> F<f> / G90 / M400". The next move is only sent when the
 // previous one is finished (M400 answered); detents and taps during a move are added up and sent as one
 // move afterwards, so the table never runs on after the knob stops.
+//
+// Feed move: one axis to a target (work coordinates) at a cutting feed. Marlin cannot change the feed of a
+// move it has planned (M220 only affects later moves), so the TFT streams the move as G1 segments of about
+// 1 s (at least 0.5 mm) and keeps only about 2 s of them in Marlin's planner; a feed change applies from the
+// next segment. What Marlin still has to run is estimated from the time each segment takes (feed and the
+// M220 override); acceleration only makes Marlin slower than the estimate, so the planner never runs dry.
+// The end is the "ok" of M400, sent once the estimate says the last segment is done. The feed override is
+// set back to 100 % when a move starts, so the feed on the screen is the real feed.
+// Stop: no more segments, then M410 (Marlin needs EMERGENCY_PARSER so it acts on M410 at once), M400, M114
+// for the stop position. After M410 Marlin drops new moves for about 1 s, so Resume waits CNC_FM_RESUME_MS.
+// During the move the readout comes from M154 S1 (needs AUTO_REPORT_REAL_POSITION in Marlin: M114 would
+// report the end of the planned segments, not where the table is).
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +41,27 @@ extern "C" {
 #define CNC_FEED_MIN      10      // feed override range (%)
 #define CNC_FEED_MAX      150
 #define CNC_FEED_REST_MS  400     // feed override is sent when the value rests this long
+
+#define CNC_FM_FEED_MIN   5       // feed move feed range (mm/min)
+#define CNC_FM_FEED_MAX   600
+#define CNC_FM_SEG_MS     1000    // feed move segment: this long at the feed ...
+#define CNC_FM_SEG_MIN_MM 0.5f    // ... but at least this long
+#define CNC_FM_AHEAD_MS   1000    // send the next segment when Marlin has less than this left
+#define CNC_FM_RESUME_MS  1500    // Marlin drops new moves for about 1 s after M410
+
+// travel in machine coordinates (Marlin X/Y_MIN_POS, X/Y_MAX_POS)
+#define CNC_X_MIN  -150.0f
+#define CNC_X_MAX   150.0f
+#define CNC_Y_MIN   -65.0f
+#define CNC_Y_MAX    65.0f
+
+typedef enum
+{
+  CNC_FM_IDLE = 0,
+  CNC_FM_MOVING,    // segments are streamed
+  CNC_FM_STOPPING,  // Stop pressed: M410 is on its way
+  CNC_FM_PAUSED,    // stopped; Resume (same target) or Cancel
+} CNC_FM_STATE;
 
 typedef struct
 {
@@ -59,6 +92,19 @@ void cncMotorsOff(void);                    // M18
 
 uint16_t cncGetFeed(void);                  // feed override shown on the TFT (%)
 void cncSetFeed(uint16_t percent);          // change it; M220 is sent once the value rests
+
+bool cncFmStart(uint8_t axis, float target, uint16_t feed);  // feed move (see above); false if not possible now
+void cncFmStop(void);                       // moving -> stopping -> paused
+bool cncFmResume(void);                     // paused -> moving to the same target; false within CNC_FM_RESUME_MS
+void cncFmCancel(void);                     // paused -> idle, nothing is sent
+void cncFmSetFeed(uint16_t feed);           // feed (mm/min) of the next segments
+CNC_FM_STATE cncFmState(void);
+uint8_t cncFmAxis(void);
+float cncFmTarget(void);
+float cncFmFrom(void);                      // where the move (or the resume) started
+uint16_t cncFmFeed(void);
+uint32_t cncFmPausedMs(void);               // time since the stop finished
+bool cncFmTakeDone(void);                   // true once after a move reached its target
 
 void cncStartCheckText(char * buf, size_t size, const char * filename);  // question before a job
 

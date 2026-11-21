@@ -1,7 +1,7 @@
 <#
   Generates TFT/src/User/API/CncDroFont.c: the large readout font of the Turtle CNC build.
 
-  Glyphs "0123456789.-XYZ" rendered with Windows' Bahnschrift SemiBold SemiCondensed (a DIN-style condensed
+  Glyphs "0123456789.-+XYZ" rendered with Windows' Bahnschrift SemiBold SemiCondensed (a DIN-style condensed
   face, like the digits of a DRO), anti-aliased, stored as 4-bit coverage (16 levels, 2 pixels per byte,
   row-major, high nibble first). Digits share one advance (tabular) so values do not jump while they change.
 
@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
-$chars = '0123456789.-XYZ'
+$chars = '0123456789.-+XYZ'
 
 function Render([char]$c, [float]$size) {
   $w = [int]($size * 1.4) + 8; $h = [int]($size * 1.6) + 8

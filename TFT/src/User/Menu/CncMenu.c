@@ -705,6 +705,678 @@ void menuCncZero(void)
   }
 }
 
+// ============================================================================ feed move
+//
+// One axis to a target at a cutting feed (API: cncFm* in Cnc.c). Design: the fmove / fmfeed screens of the mockup.
+// Idle: axis | value (tap: keypad) | ABS / REL, then Step | Feed | Send | Back; knob: turn = value by the step,
+// click = next step, long press = Send. Moving: Stop | Feed - | Feed + | (Back locked); knob: turn = feed,
+// click = Stop. Stopped: Resume | Feed - | Feed + | Cancel with the standard knob focus, starting on Cancel.
+
+#define CNC_COLOR_ERR  0xFBCD  // #ff7a6e
+
+typedef enum
+{
+  FM_MSG_OK = 0,
+  FM_MSG_WARN,
+  FM_MSG_ERR,
+} FM_MSG;
+
+static struct
+{
+  uint8_t  axis;    // X_AXIS / Y_AXIS
+  bool     rel;     // false = go to a position, true = move by a distance
+  float    abs[2];  // go to, per axis (work coordinates)
+  float    dist;    // move by
+  uint8_t  step;    // knob step: index in jogSteps[]
+  uint16_t feed;    // mm/min
+} fmUi = {X_AXIS, false, {0.0f, 0.0f}, 1.0f, 2, 50};
+
+static const uint16_t fmPresets[] = {20, 50, 100};
+static const uint16_t fmPresetIcons[] = {ICON_FM_P20, ICON_FM_P50, ICON_FM_P100};
+static const char * const fmPresetLabels[] = {"20 mm/min", "50 mm/min", "100 mm/min"};
+
+static float fmRound(float v)  // values are shown and typed with 2 decimals
+{
+  return (float)(int32_t)(v * 100.0f + (v >= 0.0f ? 0.5f : -0.5f)) / 100.0f;
+}
+
+static float fmAbs(float v)
+{
+  return v < 0.0f ? -v : v;
+}
+
+static float fmValue(void)
+{
+  return fmUi.rel ? fmUi.dist : fmUi.abs[fmUi.axis];
+}
+
+static void fmSetValue(float v)
+{
+  v = fmRound(v);
+
+  if (v > 999.99f)  v = 999.99f;  // travel is 300 mm; keeps the value inside its box
+  if (v < -999.99f) v = -999.99f;
+
+  if (fmUi.rel)
+    fmUi.dist = v;
+  else
+    fmUi.abs[fmUi.axis] = v;
+}
+
+static uint16_t fmFeedStep(uint16_t feed, int8_t dir)  // 5 mm/min below 100, then 10
+{
+  if (dir > 0)
+    feed += feed < 100 ? 5 : 10;
+  else
+    feed -= feed <= 100 ? 5 : 10;
+
+  if (feed < CNC_FM_FEED_MIN || feed > 60000)  // 60000: wrapped below 0
+    feed = CNC_FM_FEED_MIN;
+
+  return feed > CNC_FM_FEED_MAX ? CNC_FM_FEED_MAX : feed;
+}
+
+static void fmSetFeed(uint16_t feed)
+{
+  cncFmSetFeed(feed);  // clamps; used by the next segments while moving or by Resume
+  fmUi.feed = cncFmFeed();
+}
+
+static void fmTime(char * buf, uint8_t size, float dist, uint16_t feed)
+{
+  uint32_t s = (uint32_t)(dist / feed * 60.0f + 0.5f);
+
+  snprintf(buf, size, "%lu:%02lu", (unsigned long)(s / 60), (unsigned long)(s % 60));
+}
+
+// what Send would do: the target, a line for the strip, false if it cannot be sent
+static bool fmCheck(float * to, char * msg, uint8_t size, FM_MSG * kind)
+{
+  uint8_t a = fmUi.axis;
+  char ax = "XY"[a];
+  float from = fmRound(cncState.work[a]);
+  char f[12], t[12], d[12], tm[12];
+  float dist;
+
+  *kind = FM_MSG_ERR;
+  *to = fmUi.rel ? fmRound(from + fmUi.dist) : fmUi.abs[a];
+
+  if (!infoHost.connected)
+  {
+    snprintf(msg, size, "Marlin not connected");
+    return false;
+  }
+
+  if (!cncState.known)
+  {
+    snprintf(msg, size, "Waiting for position");
+    return false;
+  }
+
+  dist = fmAbs(*to - from);
+  droFormat(f, sizeof(f), from);
+  droFormat(t, sizeof(t), *to);
+  droFormat(d, sizeof(d), dist);
+  fmTime(tm, sizeof(tm), dist, fmUi.feed);
+
+  if (dist < 0.005f)
+  {
+    *kind = FM_MSG_WARN;
+    snprintf(msg, size, "%c is already at %s", ax, t);
+    return false;
+  }
+
+  if (!cncState.homed[a] || !cncState.mcsKnown)
+  {
+    *kind = FM_MSG_WARN;
+    snprintf(msg, size, "%c not homed, no limit check  %s", ax, tm);
+    return true;
+  }
+
+  // travel in work coordinates: work = machine + (work - machine)
+  float offset = cncState.work[a] - cncState.mcs[a];
+  float lo = fmRound((a == X_AXIS ? CNC_X_MIN : CNC_Y_MIN) + offset);
+  float hi = fmRound((a == X_AXIS ? CNC_X_MAX : CNC_Y_MAX) + offset);
+
+  if (*to < lo - 0.0005f || *to > hi + 0.0005f)
+  {
+    droFormat(f, sizeof(f), lo);
+    droFormat(t, sizeof(t), hi);
+    snprintf(msg, size, "Outside travel: %c %s..%s", ax, f, t);
+    return false;
+  }
+
+  *kind = FM_MSG_OK;
+  snprintf(msg, size, "%c %s -> %s  %s mm  %s", ax, f, t, d, tm);
+  return true;
+}
+
+// strip line: what Send would do, or the move in progress
+static FM_MSG fmSummary(char * msg, uint8_t size)
+{
+  CNC_FM_STATE st = cncFmState();
+  uint8_t a = cncFmAxis();
+  char w[12], t[12], d[12], tm[12];
+  float left;
+
+  if (st == CNC_FM_IDLE)
+  {
+    float to;
+    FM_MSG kind;
+
+    fmCheck(&to, msg, size, &kind);
+    return kind;
+  }
+
+  left = fmAbs(cncFmTarget() - cncState.work[a]);
+  droFormat(w, sizeof(w), cncState.work[a]);
+  droFormat(t, sizeof(t), cncFmTarget());
+  droFormat(d, sizeof(d), left);
+
+  if (st == CNC_FM_MOVING)
+  {
+    fmTime(tm, sizeof(tm), left, cncFmFeed());
+    snprintf(msg, size, "%c %s -> %s  %s mm  %s", "XY"[a], w, t, d, tm);
+    return FM_MSG_OK;
+  }
+
+  if (st == CNC_FM_STOPPING)
+    snprintf(msg, size, "Stopping ...");
+  else
+    snprintf(msg, size, "Stopped at %c %s  %s mm left", "XY"[a], w, d);
+
+  return FM_MSG_WARN;
+}
+
+// progress of the move (or resume) in 1/1000, -1 = no bar
+static int16_t fmProgress(void)
+{
+  CNC_FM_STATE st = cncFmState();
+  float all, done;
+
+  if (st == CNC_FM_IDLE)
+    return -1;
+
+  all = fmAbs(cncFmTarget() - cncFmFrom());
+  done = all - fmAbs(cncFmTarget() - cncState.work[cncFmAxis()]);
+
+  if (all < 0.001f || done <= 0.0f)
+    return 0;
+
+  return done >= all ? 1000 : (int16_t)(done / all * 1000.0f);
+}
+
+static char fmStripShown[48];
+static int8_t fmKindShown;
+static int16_t fmBarShown;
+
+static void fmStripUpdate(bool force)
+{
+  char text[48];
+  FM_MSG kind = fmSummary(text, sizeof(text));
+  int16_t bar = fmProgress();
+  const int16_t barY = cncStripRect.y1 - 3;
+
+  if (force || kind != fmKindShown || strcmp(text, fmStripShown) != 0)
+  {
+    strcpy(fmStripShown, text);
+    fmKindShown = kind;
+    GUI_SetColor(GANTRY_XYZ_BG_COLOR);
+    GUI_FillPrect(&cncStripRect);
+    GUI_SetTextMode(GUI_TEXTMODE_TRANS);
+    GUI_SetColor(kind == FM_MSG_ERR ? CNC_COLOR_ERR : (kind == FM_MSG_WARN ? CNC_COLOR_FOCUS : GANTRY_XYZ_FONT_COLOR));
+    GUI_DispStringInPrect(&cncStripRect, (uint8_t *)text);
+    GUI_RestoreColorDefault();
+    fmBarShown = -2;  // the fill erased the bar
+  }
+
+  if (bar == fmBarShown)
+    return;
+
+  fmBarShown = bar;
+
+  if (bar < 0)
+    return;
+
+  int16_t x = cncStripRect.x0 + (int32_t)(cncStripRect.x1 - cncStripRect.x0) * bar / 1000;
+
+  if (x > cncStripRect.x0)
+    GUI_FillRectColor(cncStripRect.x0, barY, x, cncStripRect.y1, CNC_COLOR_Z);
+
+  if (x < cncStripRect.x1)
+    GUI_FillRectColor(x, barY, cncStripRect.x1, cncStripRect.y1, CNC_COLOR_SEP);
+}
+
+// value box: the space between the first and the last icon of the top row (taps: exhibitRect = KEY_INFOBOX)
+static char fmExhShown[64];
+
+static void fmExhibitDraw(const char * letter, uint16_t color, const char * value, const char * sub, bool force)
+{
+  const GUI_RECT r = {exhibitRect.x0 - SPACE_X + 4, exhibitRect.y0, exhibitRect.x1 + 2 * SPACE_X - 4, exhibitRect.y1};
+  uint16_t bg = infoSettings.bg_color;
+  int16_t gap = letter[0] != '\0' ? 10 : 0;
+  char key[64];
+
+  snprintf(key, sizeof(key), "%s|%04X|%s|%s", letter, color, value, sub);
+
+  if (!force && strcmp(key, fmExhShown) == 0)
+    return;
+
+  strcpy(fmExhShown, key);
+
+  int16_t w = droTextWidth(letter) + gap + droTextWidth(value);
+  int16_t x = (r.x0 + r.x1 - w) / 2;
+  int16_t y = r.y0 + 8;
+
+  GUI_ClearPrect(&r);
+
+  if (letter[0] != '\0')
+    x = droDrawText(x, y, letter, color, bg) + gap;
+
+  droDrawText(x, y, value, CNC_COLOR_VALUE, bg);
+
+  GUI_SetColor(CNC_COLOR_DIM);
+  GUI_SetTextMode(GUI_TEXTMODE_TRANS);
+  GUI_DispStringInRect(r.x0, r.y1 - BYTE_HEIGHT - 6, r.x1, r.y1 - 6, (uint8_t *)sub);
+  GUI_RestoreColorDefault();
+}
+
+static void fmExhibitUpdate(bool force)
+{
+  bool idle = cncFmState() == CNC_FM_IDLE;
+  uint8_t a = idle ? fmUi.axis : cncFmAxis();
+  char letter[2] = {"XY"[a], '\0'};
+  char value[16], sub[24];
+  float v = idle ? fmValue() : cncFmTarget();
+
+  droFormat(value, sizeof(value), v);
+
+  if (idle && fmUi.rel && value[0] != '-')  // a distance shows its sign
+  {
+    memmove(value + 1, value, strlen(value) + 1);
+    value[0] = '+';
+  }
+
+  if (idle)
+    snprintf(sub, sizeof(sub), "%s  tap: keypad", fmUi.rel ? "move by" : "go to");
+  else
+    snprintf(sub, sizeof(sub), "F %d mm/min", fmUi.feed);
+
+  fmExhibitDraw(letter, a == X_AXIS ? CNC_COLOR_X : CNC_COLOR_Y, value, sub, force);
+}
+
+static void fmTitle(CNC_FM_STATE st)
+{
+  const char * hint = st == CNC_FM_IDLE ? "hold knob: Send" :
+                      st == CNC_FM_MOVING ? "knob: feed  click: Stop" :
+                      st == CNC_FM_STOPPING ? "STOPPING" : "STOPPED";
+
+  snprintf(cncTitle, sizeof(cncTitle), "Feed move   %s", hint);
+}
+
+static char fmFeedLabel[16];
+
+static void fmSetItems(MENUITEMS * items, CNC_FM_STATE st)
+{
+  items->items[0] = (ITEM){fmUi.axis == X_AXIS ? ICON_FM_AX_X : ICON_FM_AX_Y, {.address = fmUi.axis == X_AXIS ? "Axis X" : "Axis Y"}};
+  items->items[1] = (ITEM){ICON_NULL, LABEL_NULL};
+  items->items[2] = (ITEM){ICON_NULL, LABEL_NULL};
+  items->items[3] = (ITEM){fmUi.rel ? ICON_FM_REL : ICON_FM_ABS, {.address = fmUi.rel ? "Move by" : "Go to"}};
+
+  if (st == CNC_FM_IDLE)
+  {
+    snprintf(fmFeedLabel, sizeof(fmFeedLabel), "F %d", fmUi.feed);
+    items->items[4] = (ITEM){jogStepIcons[fmUi.step], {.address = (void *)jogStepLabels[fmUi.step]}};
+    items->items[5] = (ITEM){ICON_FM_FEED, {.address = fmFeedLabel}};
+    items->items[6] = (ITEM){ICON_FM_SEND, {.address = "Send"}};
+    items->items[7] = (ITEM){ICON_BACK, LABEL_BACK};
+  }
+  else
+  {
+    bool moving = st == CNC_FM_MOVING;
+
+    items->items[4] = (ITEM){moving ? ICON_PAUSE : ICON_RESUME, {.address = moving ? "Stop" : "Resume"}};
+    items->items[5] = (ITEM){ICON_DEC, {.address = "Feed -"}};
+    items->items[6] = (ITEM){ICON_INC, {.address = "Feed +"}};
+    items->items[7] = moving ? (ITEM){ICON_BACK, LABEL_BACK} : (ITEM){ICON_STOP, {.address = "Cancel"}};
+  }
+}
+
+static void fmDrawAll(MENUITEMS * items, CNC_FM_STATE st)
+{
+  fmSetItems(items, st);
+  fmTitle(st);
+
+  #ifdef KNOB_NAV
+    menuKnobRemember(st == CNC_FM_IDLE || st == CNC_FM_MOVING ? -1 : KEY_ICON_7);  // stopped: focus on Cancel
+  #endif
+
+  menuDrawPage(items);
+  fmExhibitUpdate(true);
+  fmStripUpdate(true);
+}
+
+static void fmSend(void)
+{
+  float to;
+  char msg[48];
+  FM_MSG kind;
+
+  if (!fmCheck(&to, msg, sizeof(msg), &kind))
+  {
+    addToast(kind == FM_MSG_ERR ? DIALOG_TYPE_ERROR : DIALOG_TYPE_INFO, msg);
+    return;
+  }
+
+  if (lockedInJob())
+    return;
+
+  if (!cncFmStart(fmUi.axis, to, fmUi.feed))
+    addToast(DIALOG_TYPE_ERROR, "Busy: wait for the jog to end");
+}
+
+static void fmFeedTurn(int16_t detents)
+{
+  uint16_t feed = fmUi.feed;
+
+  for (; detents > 0; detents--)
+    feed = fmFeedStep(feed, 1);
+
+  for (; detents < 0; detents++)
+    feed = fmFeedStep(feed, -1);
+
+  fmSetFeed(feed);
+}
+
+// opened from the Menu: "go to" starts at the current position
+static void cncFeedMoveOpen(void)
+{
+  if (cncFmState() == CNC_FM_IDLE && cncState.known)
+  {
+    fmUi.abs[X_AXIS] = fmRound(cncState.work[X_AXIS]);
+    fmUi.abs[Y_AXIS] = fmRound(cncState.work[Y_AXIS]);
+  }
+
+  fmUi.feed = cncFmFeed();
+  OPEN_MENU(menuCncFeedMove);
+}
+
+void menuCncFeedMove(void)
+{
+  MENUITEMS items = {
+    // title
+    {.address = cncTitle},
+    // icon                label
+    {
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+    }
+  };
+
+  CNC_FM_STATE st = cncFmState();
+  KEY_VALUES key_num;
+
+  if (st == CNC_FM_IDLE && lockedInJob())
+  {
+    CLOSE_MENU();
+    return;
+  }
+
+  fmDrawAll(&items, st);
+  knobReset();
+
+  while (MENU_IS(menuCncFeedMove))
+  {
+    CNC_FM_STATE now = cncFmState();
+    KNOB_PRESS press = KNOB_NONE;
+    int16_t detents = 0;
+    bool redraw = false;
+
+    if (now != st)
+    {
+      if (cncFmTakeDone())
+      {
+        static char msg[24];
+        char t[12];
+
+        droFormat(t, sizeof(t), cncFmTarget());
+        snprintf(msg, sizeof(msg), "%c at %s", "XY"[cncFmAxis()], t);
+        fmUi.abs[cncFmAxis()] = cncFmTarget();
+        addToast(DIALOG_TYPE_SUCCESS, msg);
+      }
+
+      st = now;
+      fmDrawAll(&items, st);
+      knobReset();
+    }
+
+    // readout: M114 when idle or stopped; while moving M154 S1 (M114 would give the end of the planned segments)
+    if (st == CNC_FM_MOVING)
+    {
+      if (infoMachineSettings.autoReportPos == 1)
+        coordinateQuery(1);
+      else
+        cncQueryPosition(1000);  // Marlin without auto report: the readout jumps by segments
+    }
+    else if (st != CNC_FM_STOPPING)
+    {
+      cncQueryPosition(CNC_QUERY_MS);
+    }
+
+    // knob: idle and moving use it here; stopped: focus frame + click (menu.c)
+    if (st == CNC_FM_IDLE || st == CNC_FM_MOVING)
+      detents = knobRead(&press);
+
+    if (st == CNC_FM_IDLE)
+    {
+      if (detents != 0)
+      {
+        fmSetValue(fmValue() + detents * jogSteps[fmUi.step]);
+      }
+
+      if (press == KNOB_CLICK)
+      {
+        fmUi.step = (fmUi.step + 1) % COUNT(jogSteps);
+        redraw = true;
+      }
+      else if (press == KNOB_LONG)
+      {
+        fmSend();
+      }
+    }
+    else if (st == CNC_FM_MOVING)
+    {
+      if (detents != 0)
+        fmFeedTurn(detents);
+
+      if (press == KNOB_CLICK)
+        cncFmStop();
+    }
+
+    key_num = menuKeyGetValue();
+
+    if (st == CNC_FM_IDLE)
+    {
+      switch (key_num)
+      {
+        case KEY_ICON_0:
+          fmUi.axis = fmUi.axis == X_AXIS ? Y_AXIS : X_AXIS;
+          redraw = true;
+          break;
+
+        case KEY_ICON_3:
+          fmUi.rel = !fmUi.rel;
+          redraw = true;
+          break;
+
+        case KEY_INFOBOX:  // tap on the value: keypad
+        {
+          char t[24];
+
+          snprintf(t, sizeof(t), "%s %c (mm)", fmUi.rel ? "Move by" : "Go to", "XY"[fmUi.axis]);
+          fmSetValue(numPadFloat((uint8_t *)t, fmValue(), fmUi.rel ? 0.0 : fmRound(cncState.work[fmUi.axis]), true));
+          fmDrawAll(&items, st);
+          knobReset();
+          break;
+        }
+
+        case KEY_ICON_4:
+          fmUi.step = (fmUi.step + 1) % COUNT(jogSteps);
+          redraw = true;
+          break;
+
+        case KEY_ICON_5: OPEN_MENU(menuCncFmFeed); break;
+        case KEY_ICON_6: fmSend();                 break;
+        case KEY_ICON_7: CLOSE_MENU();             break;
+
+        default:
+          break;
+      }
+    }
+    else
+    {
+      switch (key_num)
+      {
+        case KEY_ICON_0:
+        case KEY_ICON_3:
+        case KEY_INFOBOX:
+          addToast(DIALOG_TYPE_INFO, st == CNC_FM_MOVING ? "Stop the move first" : "Cancel the move first");
+          break;
+
+        case KEY_ICON_4:
+          if (st == CNC_FM_MOVING)
+            cncFmStop();
+          else if (st == CNC_FM_PAUSED && !cncFmResume())
+            addToast(DIALOG_TYPE_INFO, "Wait: Marlin drops moves 1 s after a stop");
+          break;
+
+        case KEY_ICON_5: fmSetFeed(fmFeedStep(fmUi.feed, -1)); break;
+        case KEY_ICON_6: fmSetFeed(fmFeedStep(fmUi.feed, 1));  break;
+
+        case KEY_ICON_7:
+          if (st == CNC_FM_MOVING)
+            addToast(DIALOG_TYPE_INFO, "Stop the move first");
+          else if (st == CNC_FM_PAUSED)
+            cncFmCancel();
+          break;
+
+        default:
+          break;
+      }
+    }
+
+    if (redraw)  // axis, mode or step: icons, title and value
+    {
+      fmSetItems(&items, st);
+      menuDrawItem(&items.items[0], 0);
+      menuDrawItem(&items.items[3], 3);
+      menuDrawItem(&items.items[4], 4);
+    }
+
+    fmExhibitUpdate(false);
+    fmStripUpdate(false);
+    loopProcess();
+  }
+}
+
+static void fmFeedDraw(bool force)
+{
+  char value[8];
+
+  snprintf(value, sizeof(value), "%d", fmUi.feed);
+  fmExhibitDraw("", WHITE, value, "5 to 600 mm/min", force);
+}
+
+void menuCncFmFeed(void)
+{
+  MENUITEMS items = {
+    // title
+    {.address = "Feed move: feed   tap: keypad"},
+    // icon                label
+    {
+      {ICON_DEC,           {.address = "-"}},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_NULL,          LABEL_NULL},
+      {ICON_INC,           {.address = "+"}},
+      {ICON_FM_P20,        {.address = "20 mm/min"}},
+      {ICON_FM_P50,        {.address = "50 mm/min"}},
+      {ICON_FM_P100,       {.address = "100 mm/min"}},
+      {ICON_BACK,          LABEL_BACK},
+    }
+  };
+
+  KEY_VALUES key_num;
+
+  for (uint8_t i = 0; i < COUNT(fmPresets); i++)
+  {
+    items.items[4 + i].icon = fmPresetIcons[i];
+    items.items[4 + i].label.address = (void *)fmPresetLabels[i];
+  }
+
+  #ifdef KNOB_NAV
+    menuKnobRemember(-1);  // the knob changes the value here
+  #endif
+
+  menuDrawPage(&items);
+  fmFeedDraw(true);
+  knobReset();
+
+  while (MENU_IS(menuCncFmFeed))
+  {
+    KNOB_PRESS press;
+    int16_t detents = knobRead(&press);
+
+    if (detents != 0)
+      fmFeedTurn(detents);
+
+    if (press == KNOB_CLICK)
+      CLOSE_MENU();
+
+    key_num = menuKeyGetValue();
+
+    switch (key_num)
+    {
+      case KEY_ICON_0: fmSetFeed(fmFeedStep(fmUi.feed, -1)); break;
+      case KEY_ICON_3: fmSetFeed(fmFeedStep(fmUi.feed, 1));  break;
+
+      case KEY_ICON_4:
+      case KEY_ICON_5:
+      case KEY_ICON_6:
+        fmSetFeed(fmPresets[key_num - KEY_ICON_4]);
+        break;
+
+      case KEY_INFOBOX:  // tap on the value: keypad
+      {
+        int32_t typed = numPadInt((uint8_t *)"Feed (mm/min)", fmUi.feed, 50, false);
+
+        fmSetFeed(typed < 0 ? CNC_FM_FEED_MIN : (typed > CNC_FM_FEED_MAX ? CNC_FM_FEED_MAX : (uint16_t)typed));
+
+        if (fmUi.feed != typed)
+          addToast(DIALOG_TYPE_INFO, "Feed: 5 to 600 mm/min");
+
+        menuDrawPage(&items);
+        fmFeedDraw(true);
+        knobReset();
+        break;
+      }
+
+      case KEY_ICON_7: CLOSE_MENU(); break;
+
+      default:
+        break;
+    }
+
+    fmFeedDraw(false);
+    loopProcess();
+  }
+}
+
 // ============================================================================ menu
 
 void menuCncMenu(void)
@@ -719,8 +1391,8 @@ void menuCncMenu(void)
       {ICON_FILE,              {.address = "Files"}},
       {ICON_GCODE,             {.address = "Terminal"}},
       {ICON_DISABLE_STEPPERS,  {.address = "Motors off"}},
-      {ICON_SETTINGS,          LABEL_SETTINGS},
-      {ICON_SCREEN_INFO,       {.address = "Info"}},
+      {ICON_SETTINGS,          LABEL_SETTINGS},  // also holds Info
+      {ICON_FEED_MOVE,         {.address = "Feed move"}},
       {ICON_BACK,              LABEL_BACK},
     }
   };
@@ -746,7 +1418,7 @@ void menuCncMenu(void)
         break;
 
       case KEY_ICON_5: OPEN_MENU(menuSettings); break;
-      case KEY_ICON_6: OPEN_MENU(menuInfo);     break;
+      case KEY_ICON_6: if (!lockedInJob()) cncFeedMoveOpen(); break;
       case KEY_ICON_7: CLOSE_MENU();            break;
 
       default:
