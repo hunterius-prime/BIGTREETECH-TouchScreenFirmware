@@ -85,6 +85,36 @@ void SSD1963_Init_Sequential(void)
   LCD_WR_DATA(0x00);
 }
 
+// A static discharge (touching the machine frame) can reset or upset the controller: white screen while
+// the MCU runs on. Read back three values the init sequence wrote: PLL multiplier M (0xE3), pixel data
+// interface (0xF1) and the panel width in the LCD mode (0xB1). Any difference = configuration lost.
+bool SSD1963_ConfigOk(void)
+{
+  uint16_t m, pixelIf, hdpH, hdpL;
+
+  LCD_WR_REG(0xE3);  // get PLL M, N, C
+  Delay_us(2);
+  m = LCD_RD_DATA() & 0xFF;
+  (void)LCD_RD_DATA();
+  (void)LCD_RD_DATA();
+
+  LCD_WR_REG(0xF1);  // get pixel data interface
+  Delay_us(2);
+  pixelIf = LCD_RD_DATA() & 0x07;
+
+  LCD_WR_REG(0xB1);  // get LCD mode: A, B, HDP high, HDP low, VDP high, VDP low, G
+  Delay_us(2);
+  (void)LCD_RD_DATA();
+  (void)LCD_RD_DATA();
+  hdpH = LCD_RD_DATA() & 0xFF;
+  hdpL = LCD_RD_DATA() & 0xFF;
+  (void)LCD_RD_DATA();
+  (void)LCD_RD_DATA();
+  (void)LCD_RD_DATA();
+
+  return m == 0x17 && pixelIf == 0x03 && ((hdpH << 8) | hdpL) == (SSD_HOR_RESOLUTION - 1);
+}
+
 void SSD1963_SetDirection(uint8_t rotate)
 {
   LCD_WR_REG(0X36);

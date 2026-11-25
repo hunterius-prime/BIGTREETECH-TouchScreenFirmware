@@ -266,6 +266,23 @@ void LCD_Init(void)
   #endif
 }
 
+bool LCD_ConfigOk(void)
+{
+  #if LCD_DRIVER_IS(SSD1963)
+    return SSD1963_ConfigOk();
+  #else
+    return true;
+  #endif
+}
+
+void LCD_Reinit(void)
+{
+  #if LCD_DRIVER_IS(SSD1963)
+    SSD1963_Init_Sequential();
+    LCD_RefreshDirection(infoSettings.rotated_ui);
+  #endif
+}
+
 void LCD_RefreshDirection(uint8_t rotate)
 {
   pLCD_SetDirection(rotate);

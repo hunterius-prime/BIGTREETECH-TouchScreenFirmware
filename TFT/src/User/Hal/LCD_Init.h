@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include <stdint.h>    // for uint8_t etc.
 #include "variants.h"  // for LCD_DATA_16BIT, LCD_LED_PWM_CHANNEL etc.
 
@@ -25,6 +26,8 @@ extern "C" {
 #endif
 
 void LCD_Init(void);
+bool LCD_ConfigOk(void);  // false: the controller lost its configuration (only SSD1963 can tell, others: true)
+void LCD_Reinit(void);    // run the controller init sequence again (bus, DMA and backlight are kept)
 void LCD_RefreshDirection(uint8_t rotate);
 void LCD_SetWindow(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey);
 

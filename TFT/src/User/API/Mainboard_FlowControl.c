@@ -117,6 +117,10 @@ void loopBackEnd(void)
 }
 
 // UI-related background loop tasks
+#ifdef LCD_ESD_RECOVERY
+  static void loopLcdRecovery(void);
+#endif
+
 void loopFrontEnd(void)
 {
   // check if volume source (SD/USB) insert
@@ -141,6 +145,10 @@ void loopFrontEnd(void)
 
   // loop for popup menu
   loopPopup();
+
+  #ifdef LCD_ESD_RECOVERY
+    loopLcdRecovery();
+  #endif
 }
 
 void loopProcess(void)
@@ -157,6 +165,55 @@ static void menuDummy(void)
 {
   CLOSE_MENU();
 }
+
+#ifdef LCD_ESD_RECOVERY
+// A static discharge (touching the machine frame) can reset the display controller: the screen turns
+// white while the MCU runs on normally. Check the controller once a second; after two failed checks in
+// a row (a single bad read never triggers it) initialise it again and redraw the current menu.
+#define LCD_CHECK_MS 1000
+
+static void loopLcdRecovery(void)
+{
+  static uint32_t nextCheck = 0;
+  static uint8_t fails = 0;
+  static int8_t trusted = 0;  // 0 = not checked yet, 1 = read-back works, -1 = off (read-back unreliable here)
+
+  if (trusted < 0 || OS_GetTimeMs() < nextCheck)
+    return;
+
+  nextCheck = OS_GetTimeMs() + LCD_CHECK_MS;
+
+  if (LCD_ConfigOk())
+  {
+    trusted = 1;
+    fails = 0;
+    return;
+  }
+
+  if (trusted == 0)  // first check after boot already fails: the read-back can't be trusted, never reinit
+  {
+    trusted = -1;
+    return;
+  }
+
+  if (++fails < 2)
+    return;
+
+  fails = 0;
+  LCD_Reinit();
+
+  if (!LCD_ConfigOk())  // the init did not help: give up instead of reinitialising every 2 s
+  {
+    trusted = -1;
+    return;
+  }
+
+  GUI_Clear(infoSettings.bg_color);
+
+  if (MENU_IS_NOT(menuDummy) && infoMenu.cur < MAX_MENU_DEPTH - 1)
+    OPEN_MENU(menuDummy);  // the current menu leaves its loop and is drawn again from the start
+}
+#endif
 
 void loopProcessAndGUI(void)
 {
