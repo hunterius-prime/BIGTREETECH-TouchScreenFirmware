@@ -174,20 +174,29 @@ static void menuDummy(void)
 //   re-initialises it and redraws the current menu, and that touch triggers no key.
 // - automatic, only if the display controller can be read back on this board: check it once a second;
 //   after two failed checks in a row initialise it again and redraw the current menu.
-// Once connected, the TFT reports the read-back result and every re-init to the printer with M118.
+// The TFT reports the read-back result (30 s after connecting) and every re-init to the printer with M118.
 #define LCD_CHECK_MS       1000
 #define LCD_TOUCH_RESET_MS 3000
+#define LCD_REPORT_MS      30000  // Klipper answers M105 with "ok T:0" before it is ready: report only after this delay
 
-static void lcdRecover(const char * reason)
+static void lcdRecover(bool automatic)
 {
+  uint16_t m, pixelIf, hdp;
+
+  LCD_ConfigReadback(&m, &pixelIf, &hdp);  // the values that failed the check (automatic only)
   LCD_Reinit();
   GUI_Clear(infoSettings.bg_color);
 
   if (MENU_IS_NOT(menuDummy) && infoMenu.cur < MAX_MENU_DEPTH - 1)
     OPEN_MENU(menuDummy);  // the current menu leaves its loop and is drawn again from the start
 
-  if (infoHost.connected)
-    storeCmd("M118 TFT display re-initialised (%s)\n", reason);
+  if (!infoHost.connected)
+    return;
+
+  if (automatic)
+    storeCmd("M118 TFT display re-initialised (auto, read E3=%02X F1=%X HDP=%u)\n", m, pixelIf, hdp);
+  else
+    storeCmd("M118 TFT display re-initialised (touch)\n");
 }
 
 static void loopLcdRecovery(void)
@@ -198,7 +207,13 @@ static void loopLcdRecovery(void)
   static int8_t trusted = 0;  // 0 = not checked yet, 1 = read-back works, -1 = off (read-back unreliable here)
   static bool touchDone = false;
   static bool reported = false;
+  static uint32_t connectedAt = 0;
   uint32_t now = OS_GetTimeMs();
+
+  if (!infoHost.connected)
+    connectedAt = 0;
+  else if (connectedAt == 0)
+    connectedAt = now | 1;  // never 0 while connected
 
   // manual recovery: touch held for 3 s (only reached during a print, else the mode menu takes over at 1.5 s)
   if (XPT2046_Read_Pen())  // not pressed
@@ -214,12 +229,12 @@ static void loopLcdRecovery(void)
   {
     touchDone = true;
     TS_DiscardRelease();
-    lcdRecover("touch");
+    lcdRecover(false);
     return;
   }
 
   // report once whether the automatic check works on this board
-  if (!reported && trusted != 0 && infoHost.connected)
+  if (!reported && trusted != 0 && connectedAt != 0 && now - connectedAt >= LCD_REPORT_MS)
   {
     uint16_t m, pixelIf, hdp;
 
@@ -250,7 +265,7 @@ static void loopLcdRecovery(void)
     return;
 
   fails = 0;
-  lcdRecover("auto");
+  lcdRecover(true);
 
   if (!LCD_ConfigOk())  // the init did not help: stop checking instead of reinitialising every 2 s
     trusted = -1;
