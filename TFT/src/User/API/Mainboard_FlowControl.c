@@ -202,7 +202,6 @@ static void lcdRecover(bool automatic)
 static void loopLcdRecovery(void)
 {
   static uint32_t nextCheck = 0;
-  static uint32_t pressStart = 0;
   static uint8_t fails = 0;
   static int8_t trusted = 0;  // 0 = not checked yet, 1 = read-back works, -1 = off (read-back unreliable here)
   static bool touchDone = false;
@@ -215,17 +214,16 @@ static void loopLcdRecovery(void)
   else if (connectedAt == 0)
     connectedAt = now | 1;  // never 0 while connected
 
-  // manual recovery: touch held for 3 s (only reached during a print, else the mode menu takes over at 1.5 s)
-  if (XPT2046_Read_Pen())  // not pressed
+  // manual recovery: touch held for 3 s. The hold is timed in the 1 ms touch tick: sampling the pen here
+  // missed the releases of quick taps (a menu change redraws the screen before this loop runs again),
+  // so a few taps in a row looked like a 3 s hold.
+  uint16_t heldMs = TS_PressedMs();
+
+  if (heldMs == 0)
   {
-    pressStart = 0;
     touchDone = false;
   }
-  else if (pressStart == 0)
-  {
-    pressStart = now | 1;  // never 0 while pressed
-  }
-  else if (!touchDone && now - pressStart >= LCD_TOUCH_RESET_MS)
+  else if (!touchDone && heldMs >= LCD_TOUCH_RESET_MS)
   {
     touchDone = true;
     TS_DiscardRelease();

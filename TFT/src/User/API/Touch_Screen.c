@@ -40,6 +40,8 @@
 #define TS_ERR_RANGE   10
 
 static volatile uint8_t touchCountdown = TS_DEBOUNCE_MS;
+static volatile uint16_t pressedMs = 0;  // how long the screen has been held (0 = released), counted once a millisecond
+static volatile uint8_t releasedMs = 0;
 
 int32_t TS_CalPara[7];
 bool TS_Sound = true;
@@ -60,16 +62,31 @@ void TS_CheckPress(void)
   {
     if (touchCountdown > 0)
       touchCountdown--;
+
+    if (pressedMs < UINT16_MAX)
+      pressedMs++;
+
+    releasedMs = 0;
   }
   else
   {
     touchCountdown = TS_DEBOUNCE_MS;
+
+    if (releasedMs < TS_DEBOUNCE_MS)
+      releasedMs++;
+    else
+      pressedMs = 0;  // released for the debounce time: the hold has ended
   }
 }
 
 bool TS_IsPressed(void)
 {
   return (touchCountdown == 0);
+}
+
+uint16_t TS_PressedMs(void)
+{
+  return pressedMs;
 }
 
 uint16_t TS_KeyValue(uint8_t totalRect, const GUI_RECT * menuRect)
