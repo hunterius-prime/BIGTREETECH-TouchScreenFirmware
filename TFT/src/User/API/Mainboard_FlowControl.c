@@ -168,20 +168,70 @@ static void menuDummy(void)
 
 #ifdef LCD_ESD_RECOVERY
 // A static discharge (touching the machine frame) can reset the display controller: the screen turns
-// white while the MCU runs on normally. Check the controller once a second; after two failed checks in
-// a row (a single bad read never triggers it) initialise it again and redraw the current menu.
-#define LCD_CHECK_MS 1000
+// white while the MCU runs on normally. Two ways back:
+// - manual: hold a finger on the screen. When idle, the 1.5 s hold that opens the Marlin/Touch mode
+//   menu also re-initialises the display (Mode_CheckSwitching); during a print (no mode menu) a 3 s hold
+//   re-initialises it and redraws the current menu, and that touch triggers no key.
+// - automatic, only if the display controller can be read back on this board: check it once a second;
+//   after two failed checks in a row initialise it again and redraw the current menu.
+// Once connected, the TFT reports the read-back result and every re-init to the printer with M118.
+#define LCD_CHECK_MS       1000
+#define LCD_TOUCH_RESET_MS 3000
+
+static void lcdRecover(const char * reason)
+{
+  LCD_Reinit();
+  GUI_Clear(infoSettings.bg_color);
+
+  if (MENU_IS_NOT(menuDummy) && infoMenu.cur < MAX_MENU_DEPTH - 1)
+    OPEN_MENU(menuDummy);  // the current menu leaves its loop and is drawn again from the start
+
+  if (infoHost.connected)
+    storeCmd("M118 TFT display re-initialised (%s)\n", reason);
+}
 
 static void loopLcdRecovery(void)
 {
   static uint32_t nextCheck = 0;
+  static uint32_t pressStart = 0;
   static uint8_t fails = 0;
   static int8_t trusted = 0;  // 0 = not checked yet, 1 = read-back works, -1 = off (read-back unreliable here)
+  static bool touchDone = false;
+  static bool reported = false;
+  uint32_t now = OS_GetTimeMs();
 
-  if (trusted < 0 || OS_GetTimeMs() < nextCheck)
+  // manual recovery: touch held for 3 s (only reached during a print, else the mode menu takes over at 1.5 s)
+  if (XPT2046_Read_Pen())  // not pressed
+  {
+    pressStart = 0;
+    touchDone = false;
+  }
+  else if (pressStart == 0)
+  {
+    pressStart = now | 1;  // never 0 while pressed
+  }
+  else if (!touchDone && now - pressStart >= LCD_TOUCH_RESET_MS)
+  {
+    touchDone = true;
+    TS_DiscardRelease();
+    lcdRecover("touch");
+    return;
+  }
+
+  // report once whether the automatic check works on this board
+  if (!reported && trusted != 0 && infoHost.connected)
+  {
+    uint16_t m, pixelIf, hdp;
+
+    LCD_ConfigReadback(&m, &pixelIf, &hdp);
+    storeCmd("M118 TFT display check %s (read E3=%02X F1=%X HDP=%u)\n", trusted > 0 ? "ON" : "OFF", m, pixelIf, hdp);
+    reported = true;
+  }
+
+  if (trusted < 0 || now < nextCheck)
     return;
 
-  nextCheck = OS_GetTimeMs() + LCD_CHECK_MS;
+  nextCheck = now + LCD_CHECK_MS;
 
   if (LCD_ConfigOk())
   {
@@ -200,18 +250,10 @@ static void loopLcdRecovery(void)
     return;
 
   fails = 0;
-  LCD_Reinit();
+  lcdRecover("auto");
 
-  if (!LCD_ConfigOk())  // the init did not help: give up instead of reinitialising every 2 s
-  {
+  if (!LCD_ConfigOk())  // the init did not help: stop checking instead of reinitialising every 2 s
     trusted = -1;
-    return;
-  }
-
-  GUI_Clear(infoSettings.bg_color);
-
-  if (MENU_IS_NOT(menuDummy) && infoMenu.cur < MAX_MENU_DEPTH - 1)
-    OPEN_MENU(menuDummy);  // the current menu leaves its loop and is drawn again from the start
 }
 #endif
 

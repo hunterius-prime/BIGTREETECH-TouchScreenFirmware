@@ -85,9 +85,33 @@ void SSD1963_Init_Sequential(void)
   LCD_WR_DATA(0x00);
 }
 
+// Init again while running (white screen after a static discharge). The sequence above assumes the PLL is
+// off as after power-on: switch the system clock back to the crystal first, reprogramming the PLL while it
+// clocks the controller is not allowed.
+void SSD1963_Reinit(void)
+{
+  LCD_WR_REG(0xE0);   // PLL control
+  LCD_WR_DATA(0x00);  // PLL off, crystal as system clock
+  Delay_ms(1);
+  LCD_WR_REG(0x01);   // soft reset
+  Delay_ms(10);
+  SSD1963_Init_Sequential();
+}
+
+static uint16_t lastM, lastPixelIf, lastHdp;  // last read-back values, for the diagnostic report
+
+void SSD1963_LastReadback(uint16_t * m, uint16_t * pixelIf, uint16_t * hdp)
+{
+  *m = lastM;
+  *pixelIf = lastPixelIf;
+  *hdp = lastHdp;
+}
+
 // A static discharge (touching the machine frame) can reset or upset the controller: white screen while
 // the MCU runs on. Read back three values the init sequence wrote: PLL multiplier M (0xE3), pixel data
 // interface (0xF1) and the panel width in the LCD mode (0xB1). Any difference = configuration lost.
+// NOTE: BTT boards may not support reading from the LCD bus at all (see SCREEN_SHOT_TO_SD in
+//       Configuration.h); then the first check fails and the automatic recovery stays off.
 bool SSD1963_ConfigOk(void)
 {
   uint16_t m, pixelIf, hdpH, hdpL;
@@ -111,6 +135,10 @@ bool SSD1963_ConfigOk(void)
   (void)LCD_RD_DATA();
   (void)LCD_RD_DATA();
   (void)LCD_RD_DATA();
+
+  lastM = m;
+  lastPixelIf = pixelIf;
+  lastHdp = (hdpH << 8) | hdpL;
 
   return m == 0x17 && pixelIf == 0x03 && ((hdpH << 8) | hdpL) == (SSD_HOR_RESOLUTION - 1);
 }

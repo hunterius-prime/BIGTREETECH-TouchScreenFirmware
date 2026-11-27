@@ -79,5 +79,11 @@ void Mode_CheckSwitching(void)
     return;
 
   if (btnPressed)
+  {
+    #ifdef LCD_ESD_RECOVERY
+      LCD_Reinit();  // the long press also brings back a display that went white (static discharge)
+    #endif
+
     OPEN_MENU(menuMode);
+  }
 }

@@ -275,10 +275,19 @@ bool LCD_ConfigOk(void)
   #endif
 }
 
+void LCD_ConfigReadback(uint16_t * a, uint16_t * b, uint16_t * c)
+{
+  #if LCD_DRIVER_IS(SSD1963)
+    SSD1963_LastReadback(a, b, c);
+  #else
+    *a = *b = *c = 0;
+  #endif
+}
+
 void LCD_Reinit(void)
 {
   #if LCD_DRIVER_IS(SSD1963)
-    SSD1963_Init_Sequential();
+    SSD1963_Reinit();
     LCD_RefreshDirection(infoSettings.rotated_ui);
   #endif
 }

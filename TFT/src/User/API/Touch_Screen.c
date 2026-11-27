@@ -95,6 +95,13 @@ uint16_t TS_KeyValue(uint8_t totalRect, const GUI_RECT * menuRect)
   return IDLE_TOUCH;
 }
 
+static bool discardRelease = false;
+
+void TS_DiscardRelease(void)
+{
+  discardRelease = true;
+}
+
 uint16_t KEY_GetValue(uint8_t totalRect, const GUI_RECT * menuRect)
 {
   static uint16_t key_num = IDLE_TOUCH;
@@ -123,6 +130,12 @@ uint16_t KEY_GetValue(uint8_t totalRect, const GUI_RECT * menuRect)
       key_return = key_num;
       key_num = IDLE_TOUCH;
       firstPress = true;
+
+      if (discardRelease)  // the touch was used for something else (e.g. LCD recovery): no key
+      {
+        discardRelease = false;
+        key_return = IDLE_TOUCH;
+      }
 
       #ifdef LCD_LED_PWM_CHANNEL
         // if LCD is blocked (on idle), skip the first touch, preventing to trigger any undesired action,

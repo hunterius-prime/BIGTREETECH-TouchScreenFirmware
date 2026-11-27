@@ -18,6 +18,7 @@ void TS_CheckPress(void);  // WARNING, TIMER INTERRUPT ROUTINE CALLED ONCE A MIL
 bool TS_IsPressed(void);
 uint16_t TS_KeyValue(uint8_t totalRect, const GUI_RECT * menuRect);
 uint16_t KEY_GetValue(uint8_t totalRect, const GUI_RECT * menuRect);
+void TS_DiscardRelease(void);  // the current touch triggers no key when released
 
 void TS_Calibrate(void);
 

@@ -28,6 +28,7 @@ extern "C" {
 void LCD_Init(void);
 bool LCD_ConfigOk(void);  // false: the controller lost its configuration (only SSD1963 can tell, others: true)
 void LCD_Reinit(void);    // run the controller init sequence again (bus, DMA and backlight are kept)
+void LCD_ConfigReadback(uint16_t * a, uint16_t * b, uint16_t * c);  // values read by the last LCD_ConfigOk()
 void LCD_RefreshDirection(uint8_t rotate);
 void LCD_SetWindow(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey);
 
