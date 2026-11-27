@@ -232,13 +232,14 @@ static void loopLcdRecovery(void)
   }
 
   // report once whether the automatic check works on this board
-  if (!reported && trusted != 0 && connectedAt != 0 && now - connectedAt >= LCD_REPORT_MS)
+  // (storeCmd() drops the command when the queue is full, as it is right after connecting: wait for a free slot)
+  if (!reported && trusted != 0 && connectedAt != 0 && now - connectedAt >= LCD_REPORT_MS && !isFullCmdQueue())
   {
     uint16_t m, pixelIf, hdp;
 
     LCD_ConfigReadback(&m, &pixelIf, &hdp);
-    storeCmd("M118 TFT display check %s (read E3=%02X F1=%X HDP=%u)\n", trusted > 0 ? "ON" : "OFF", m, pixelIf, hdp);
-    reported = true;
+    reported = storeCmd("M118 TFT display check %s (read E3=%02X F1=%X HDP=%u)\n",
+                        trusted > 0 ? "ON" : "OFF", m, pixelIf, hdp);
   }
 
   if (trusted < 0 || now < nextCheck)
