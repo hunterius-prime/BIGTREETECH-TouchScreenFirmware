@@ -933,6 +933,13 @@ void parseAck(void)
     {
       setParameter(P_MBL_OFFSET, 0, ack_value());
     }
+    // Klipper (tft-bridge macros): "// TFT babystep: G-code Z offset +0.070" is Klipper's real babystep
+    // total, reported after every SET_GCODE_OFFSET (print start, restart, this TFT, web UI). Take it over,
+    // so the Babystep menu shows Klipper's value and its Reset returns exactly to 0
+    else if (ack_seen("TFT babystep: G-code Z offset"))
+    {
+      babystepSetValue(ack_value());
+    }
     // parse and store M290 (Probe Offset) or M503 (M851), probe offset value (e.g. from Babystep menu) and
     // X an Y probe offset for LevelCorner position limit
     else if (ack_seen("Probe Offset") || ack_starts_with("M851"))
